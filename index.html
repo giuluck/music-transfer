@@ -25,27 +25,86 @@
 <main class="w-100 d-flex flex-column gap-4 my-4" style="max-width: 992px">
     <div class="d-flex flex-column flex-md-row gap-1 gap-md-3 align-items-md-center"
          ng-repeat="role in ['source', 'target']"
-         ng-if="step >= $index">
-        <label for="{{role}}" class="w-100">
+         ng-if="choices[role].token()">
+        <label for="{{role}}" class="text-nowrap">
             <span class="fw-bolder">{{$index + 1}}.</span>
             Select your <span class="text-emphasize">{{role}}</span> service:
         </label>
         <select id="{{role}}"
-                class="w-100"
+                class="w-100 small"
+                style="padding: 2px 6px"
                 ng-change="authorize(role)"
                 ng-model="choices[role]"
                 ng-options="service as service.name disable when service.disabled for service in services">
         </select>
     </div>
-    <div ng-if="step >= 2" class="d-flex flex-column gap-1">
-        <span>
+    <div ng-if="choices.transfer" class="d-flex flex-column gap-3">
+        <span class="">
             <span class="fw-bolder">3.</span>
             Select the data you want to <span class="text-emphasize">transfer</span>:
         </span>
+        <ul class="nav nav-tabs" role="tablist">
+            <li ng-repeat="(key, _) in choices.transfer" class="nav-item" role="presentation">
+                <button class="nav-link text-capitalize small {{$first ? 'active' : ''}}"
+                        id="{{key}}-tab"
+                        data-bs-toggle="tab"
+                        data-bs-target="#{{key}}-page"
+                        aria-selected="{{$index}}"
+                        aria-controls="{{key}}-page"
+                        type="button"
+                        role="tab">
+                    {{key}}
+                </button>
+            </li>
+        </ul>
+        <div class="tab-content">
+            <div ng-repeat="(key, values) in choices.transfer"
+                 class="tab-pane fade {{$first ? 'show active' : ''}}"
+                 id="{{key}}-page"
+                 aria-labelledby="{{key}}-tab"
+                 role="tabpanel">
+                <div class="d-flex align-items-between mb-3 gap-3 w-100 buttons">
+                    <button class="w-100 text-decoration-underline" ng-click="selection(key, true)">
+                        Select All
+                    </button>
+                    <button class="w-100 text-decoration-underline" ng-click="selection(key, false)">
+                        Deselect All
+                    </button>
+                    <button class="w-100 text-decoration-underline text-capitalize">
+                        Transfer
+                    </button>
+                </div>
+                <table class="d-flex flex-column align-items-center table table-borderless table-responsive small">
+                    <tbody class="w-100" style="max-width: 768px">
+                    <tr ng-repeat="value in values"
+                        class="d-flex align-items-center justify-content-between gap-3 my-1">
+                        <th scope="row" class="p-0 table-checkbox">
+                            <input type="checkbox"
+                                   id="{{key}}-{{value.id}}"
+                                   ng-model="value.selected"/>
+                        </th>
+                        <td class="p-0 w-100 text-center">
+                            <label for="{{key}}-{{value.id}}"
+                                   class="{{value.selected ? 'fw-bold' : 'text-decoration-line-through'}}">
+                                {{value}}
+                            </label>
+                        </td>
+                        <td class="p-0 table-image">
+                            <img ng-src="{{value.artwork ? value.artwork : 'res/placeholder.png'}}"
+                                 alt="{{value.name}}">
+                        </td>
+                    </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
     </div>
     <div ng-if="error" class="alert alert-danger" role="alert">
         The server responded with an error, please try again...
     </div>
 </main>
+
+{{choices.transfer.playlists[0].artwork}}
+
 </body>
 </html>

@@ -1,8 +1,14 @@
-import {services} from "./services.js"
+import {Dummy} from "./service.js"
+import {Spotify} from "./spotify.js"
+import {Tidal} from "./tidal.js"
 
 angular.module("module", ["ngSanitize"]).controller("controller", function ($scope) {
     // set list of available services
-    $scope.services = services
+    $scope.services = {
+        null: new Dummy(() => $scope.$apply()),
+        Tidal: new Tidal(() => $scope.$apply()),
+        Spotify: new Spotify(() => $scope.$apply())
+    }
 
     // handle choices
     $scope.choices = {
@@ -11,14 +17,18 @@ angular.module("module", ["ngSanitize"]).controller("controller", function ($sco
         transfer: undefined
     }
 
-    // handle current step and errors
-    $scope.step = $scope.choices.source.token() ? ($scope.choices.target.token() ? 2 : 1) : 0
+    // handle requests failure and success
     $scope.error = false
-    $scope.warning = (message, data) => {
-        // in case of warning, set the error flag to true, remove the waiting response flag, clear the search, and log)
-        $scope.error = true
-        localStorage.removeItem("waiting")
+    $scope.failure = (message, data) => {
         console.warn(message, data)
+        localStorage.removeItem("waiting")
+        $scope.error = true
+        $scope.$apply()
+    }
+    $scope.success = (role, service) => {
+        localStorage.setItem(role, service)
+        localStorage.removeItem("waiting")
+        location.search = ""
     }
 
     // if an authentication code is returned, check whether a response is being waited (otherwise, clean the search)
@@ -35,15 +45,10 @@ angular.module("module", ["ngSanitize"]).controller("controller", function ($sco
             const service = $scope.services[name]
             if (params.get("state") === service.state()) {
                 service.exchange_token(code)
-                    .done(_ => {
-                        // store the role name, remove the waiting response flag, and clear the search
-                        localStorage.setItem(role, name)
-                        localStorage.removeItem("waiting")
-                        location.search = ""
-                    })
-                    .fail(res => $scope.warning("Error after token exchange request", res))
+                    .done(_ => $scope.success(role, name))
+                    .fail(res => $scope.failure("Error after token exchange request", res))
             } else {
-                $scope.warning("Wrong state yielded by the server", {
+                $scope.failure("Wrong state yielded by the server", {
                     expected: service.state(),
                     obtained: params.get("state")
                 })
@@ -53,25 +58,32 @@ angular.module("module", ["ngSanitize"]).controller("controller", function ($sco
         }
     }
 
-    // if in the transfer step
-    if ($scope.step === 2) {
-        const source = $scope.choices.source
-        source.export()
+    // if both the source and the target have been authorized with a token, proceed with the export
+    if ($scope.choices.source.token() && $scope.choices.target.token()) {
+        $scope.choices.source.export()
+            .done(res => {
+                $scope.choices.transfer = res
+                $scope.$apply()
+            })
+            .fail(res => $scope.failure("Error after source export request", res))
     }
 
     // authorization handler for options
     $scope.authorize = role => {
         // retrieve the current service
         const service = $scope.choices[role]
-        // if a token is already available, remove the waiting response flag, recompute the step, and set the role
+        // if a token is already available, call the success routine
         // otherwise store the waiting response flag and redirect to the authorization url
         if (service.token()) {
-            localStorage.removeItem("waiting")
-            localStorage.setItem(role, service.name)
-            $scope.step = $scope.choices.source.token() ? ($scope.choices.target.token() ? 2 : 1) : 0
+            $scope.success(role, service.name)
         } else {
             localStorage.setItem("waiting", role + " " + service.name)
             service.authorization_url().then(url => location.href = url)
         }
+    }
+
+    // selection handler for batch operations
+    $scope.selection = (key, selected) => {
+        $scope.choices.transfer[key].map(item => item.selected = selected)
     }
 })

@@ -1,9 +1,10 @@
 @import url("https://fonts.googleapis.com/css2?family=Montserrat:ital,wght@0,100..900;1,100..900");
 
 :root {
-    --dark: #4F200D;
-    --medium: #DD7A00;
-    --light: #F6F1E9;
+    --foreground: #4F200D;
+    --emphasis: #DD7A00;
+    --items: #FAD691;
+    --background: #F6F1E9;
     --font-size: 16px;
 
     @media (min-width: 786px) {
@@ -14,13 +15,53 @@
 html, body {
     font-family: "Montserrat", sans-serif;
     font-size: var(--font-size);
-    color: var(--dark);
-    background: var(--light);
-    scrollbar-color: var(--dark) rgba(255, 255, 255, 0.6);
+    color: var(--foreground);
+    background: var(--background);
+    scrollbar-color: var(--foreground) rgba(255, 255, 255, 0.6);
+}
+
+li {
+    button {
+        color: var(--foreground) !important;
+    }
+
+    .active {
+        font-weight: bold;
+    }
+}
+
+input[type=checkbox] {
+    height: calc(1.2 * var(--font-size));
+    margin-top: calc(0.35 * var(--font-size));
+    accent-color: var(--emphasis);
+}
+
+input[type=checkbox], .table-checkbox {
+    width: calc(1.2 * var(--font-size));
+}
+
+img, .table-image {
+    width: calc(5 * var(--font-size));
+    height: calc(5 * var(--font-size));
+}
+
+.nav-link.active, select {
+    background: var(--background) !important;
+}
+
+.buttons {
+    button {
+        background: var(--items);
+        font-weight: 600;
+        font-size: calc(0.7 * var(--font-size));
+        border: calc(0.1 * var(--font-size)) solid var(--foreground);
+        border-radius: 5px;
+        min-height: 35px;
+        padding: 5px 0;
+    }
 }
 
 .text-emphasize {
-    font-weight: 600;
-    color: var(--medium);
+    color: var(--emphasis);
+    font-weight: bold;
 }
-

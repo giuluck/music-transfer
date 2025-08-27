@@ -22,80 +22,68 @@
         Transfer saved playlists, tracks, albums, and artists across streaming platforms!
     </h2>
 </header>
-<main class="w-100 d-flex flex-column gap-4 my-4" style="max-width: 992px">
-    <div class="d-flex flex-column flex-md-row gap-1 gap-md-3 align-items-md-center"
-         ng-repeat="role in ['source', 'target']"
-         ng-if="choices[role].token()">
-        <label for="{{role}}" class="text-nowrap">
-            <span class="fw-bolder">{{$index + 1}}.</span>
-            Select your <span class="text-emphasize">{{role}}</span> service:
+<main class="w-100 d-flex flex-column gap-4 my-4" style="max-width: 1200px">
+    <div class="d-flex flex-column flex-md-row gap-1 gap-md-3 align-items-md-center">
+        <label for="source" class="text-nowrap">
+            <span class="fw-bolder">1.</span> Select your <span class="text-emphasize">source</span> service:
         </label>
-        <select id="{{role}}"
+        <select id="source"
                 class="w-100 small"
                 style="padding: 2px 6px"
-                ng-change="authorize(role)"
-                ng-model="choices[role]"
-                ng-options="service as service.name disable when service.disabled for service in services">
+                ng-model="choices.source"
+                ng-change="authorize('source')"
+                ng-options="s as s.name disable when s.disabled for s in services">
         </select>
     </div>
-    <div ng-if="choices.transfer" class="d-flex flex-column gap-3">
-        <span class="">
-            <span class="fw-bolder">3.</span>
-            Select the data you want to <span class="text-emphasize">transfer</span>:
-        </span>
-        <ul class="nav nav-tabs" role="tablist">
-            <li ng-repeat="(key, _) in choices.transfer" class="nav-item" role="presentation">
-                <button class="nav-link text-capitalize small {{$first ? 'active' : ''}}"
-                        id="{{key}}-tab"
-                        data-bs-toggle="tab"
-                        data-bs-target="#{{key}}-page"
-                        aria-selected="{{$index}}"
-                        aria-controls="{{key}}-page"
-                        type="button"
-                        role="tab">
-                    {{key}}
-                </button>
-            </li>
-        </ul>
-        <div class="tab-content">
-            <div ng-repeat="(key, values) in choices.transfer"
-                 class="tab-pane fade {{$first ? 'show active' : ''}}"
-                 id="{{key}}-page"
-                 aria-labelledby="{{key}}-tab"
-                 role="tabpanel">
-                <div class="d-flex align-items-between mb-3 gap-3 w-100 buttons">
-                    <button class="w-100 text-decoration-underline" ng-click="selection(key, true)">
-                        Select All
-                    </button>
-                    <button class="w-100 text-decoration-underline" ng-click="selection(key, false)">
-                        Deselect All
-                    </button>
-                    <button class="w-100 text-decoration-underline text-capitalize">
-                        Transfer
-                    </button>
-                </div>
-                <table class="d-flex flex-column align-items-center table table-borderless table-responsive small">
-                    <tbody class="w-100" style="max-width: 768px">
-                    <tr ng-repeat="value in values"
-                        class="d-flex align-items-center justify-content-between gap-3 my-1">
-                        <th scope="row" class="p-0 table-checkbox">
-                            <input type="checkbox"
-                                   id="{{key}}-{{value.id}}"
-                                   ng-model="value.selected"/>
-                        </th>
-                        <td class="p-0 w-100 text-center">
-                            <label for="{{key}}-{{value.id}}"
-                                   class="{{value.selected ? 'fw-bold' : 'text-decoration-line-through'}}">
-                                {{value}}
-                            </label>
-                        </td>
-                        <td class="p-0 table-image">
-                            <img ng-src="{{value.artwork ? value.artwork : 'res/placeholder.png'}}"
-                                 alt="{{value.name}}">
-                        </td>
-                    </tr>
-                    </tbody>
-                </table>
+    <div class="d-flex flex-column flex-md-row gap-1 gap-md-3 align-items-md-center" ng-if="choices.source.token()">
+        <label for="target" class="text-nowrap">
+            <span class="fw-bolder">2.</span> Select your <span class="text-emphasize">target</span> service:
+        </label>
+        <select id="target"
+                class="w-100 small"
+                style="padding: 2px 6px"
+                ng-model="choices.target"
+                ng-change="authorize('target')"
+                ng-options="s as s.name disable when (s.disabled || s.name === choices.source.name) for s in services">
+        </select>
+    </div>
+    <div ng-if="choices.transfer" class="d-flex flex-column gap-2">
+        <label for="transfer">
+            <span class="fw-bolder">3.</span> Select the data you want to <span class="text-emphasize">transfer</span>:
+        </label>
+        <select id="transfer"
+                class="w-100 small"
+                style="padding: 2px 6px"
+                ng-model="choices.transfer"
+                ng-change="choices.transfer.fetch()"
+                ng-options="item for item in results">
+        </select>
+        <div class="row buttons">
+            <button class="col text-decoration-underline ms-3"
+                    ng-disabled="!choices.transfer.ready()"
+                    ng-click="selection(true)">
+                Select All
+            </button>
+            <button class="col text-decoration-underline mx-2"
+                    ng-disabled="!choices.transfer.ready()"
+                    ng-click="selection(false)">
+                Deselect All
+            </button>
+            <button class="col text-decoration-underline text-capitalize me-3"
+                    ng-disabled="!choices.transfer.ready()"
+                    ng-click="transfer()">
+                {{choices.transfer.ready() ? "Transfer" : choices.transfer.items.length + "/" + choices.transfer.size}}
+            </button>
+        </div>
+        <div class="d-grid small items">
+            <div ng-repeat="item in choices.transfer.items"
+                 class="d-flex flex-row flex-lg-row align-items-center gap-2 mx-3 my-1"
+                 ng-class="{'flex-md-row-reverse': $odd}">
+                <input type="checkbox" id="{{key}}-{{item.id}}" ng-model="item.selected"/>
+                <label for="{{key}}-{{item.id}}"
+                       class="{{item.selected ? 'fw-bold' : 'text-decoration-line-through'}}">
+                    {{item}}
+                </label>
             </div>
         </div>
     </div>
@@ -104,7 +92,8 @@
     </div>
 </main>
 
-{{choices.transfer.playlists[0].artwork}}
+{{choices.transfer.items.length}}
+{{choices.transfer.size}}
 
 </body>
 </html>

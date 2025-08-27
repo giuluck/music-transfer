@@ -6,9 +6,15 @@
     --items: #FAD691;
     --background: #F6F1E9;
     --font-size: 16px;
+    --columns: 1;
 
-    @media (min-width: 786px) {
+    @media (min-width: 768px) {
+        --columns: 2;
+    }
+
+    @media (min-width: 992px) {
         --font-size: 20px;
+        --columns: 3;
     }
 }
 
@@ -20,45 +26,30 @@ html, body {
     scrollbar-color: var(--foreground) rgba(255, 255, 255, 0.6);
 }
 
-li {
-    button {
-        color: var(--foreground) !important;
-    }
-
-    .active {
-        font-weight: bold;
-    }
-}
-
 input[type=checkbox] {
-    height: calc(1.2 * var(--font-size));
-    margin-top: calc(0.35 * var(--font-size));
+    min-width: calc(1.4 * var(--font-size));
+    max-width: calc(1.4 * var(--font-size));
+    min-height: calc(1.4 * var(--font-size));
+    max-height: calc(1.4 * var(--font-size));
     accent-color: var(--emphasis);
 }
 
-input[type=checkbox], .table-checkbox {
-    width: calc(1.2 * var(--font-size));
-}
-
-img, .table-image {
-    width: calc(5 * var(--font-size));
-    height: calc(5 * var(--font-size));
-}
-
-.nav-link.active, select {
+select, .nav-link.active {
     background: var(--background) !important;
 }
 
-.buttons {
-    button {
-        background: var(--items);
-        font-weight: 600;
-        font-size: calc(0.7 * var(--font-size));
-        border: calc(0.1 * var(--font-size)) solid var(--foreground);
-        border-radius: 5px;
-        min-height: 35px;
-        padding: 5px 0;
-    }
+.buttons > button {
+    background: var(--items);
+    font-weight: 600;
+    font-size: calc(0.7 * var(--font-size));
+    border: calc(0.1 * var(--font-size)) solid var(--foreground);
+    border-radius: 5px;
+    min-height: 35px;
+    padding: 5px 0;
+}
+
+.items {
+    grid-template-columns: repeat(var(--columns), 1fr);
 }
 
 .text-emphasize {

@@ -1,4 +1,4 @@
-const redirect = "https://localhost:63342/music-transfer/index.html"
+export const redirect = "https://localhost:63342/music-transfer/index.html"
 const alphanumeric = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
 
 function generate(length) {
@@ -15,43 +15,46 @@ export class Service {
 
     // pass angular update routine ($scope.$apply) to update the scope on ajax responses
     constructor(update) {
-        if (this.constructor === Service) {
-            throw new Error("Cannot instantiate an abstract class")
-        }
         this.name = this.constructor.name
         this.update = update
     }
 
-    _set(key, value) {
-        localStorage.setItem(key + this.name, value)
+    set(key, value) {
+        sessionStorage.setItem(key + this.name, value)
     }
 
-    _get(key) {
-        return localStorage.getItem(key + this.name)
+    get(key) {
+        return sessionStorage.getItem(key + this.name)
     }
 
-    _remove(key) {
-        return localStorage.removeItem(key + this.name)
+    remove(key) {
+        return sessionStorage.removeItem(key + this.name)
     }
 
     verifier() {
-        return this._get("verifier")
+        return this.get("verifier")
     }
 
     state() {
-        return this._get("state")
+        return this.get("state")
     }
 
     token() {
-        return this._get("token")
+        return this.get("token")
     }
 
-    authorization_url() {
+    clear() {
+        this.remove("verifier")
+        this.remove("state")
+        this.remove("token")
+    }
+
+    authorize() {
         // build and store random state and code verifier for the payload (saved in the storage)
         const verifier = generate(64)
         const state = generate(16)
-        this._set("verifier", verifier)
-        this._set("state", state)
+        this.set("verifier", verifier)
+        this.set("state", state)
         // perform cryptographic operations to get the code challenge from the verifier
         return crypto.subtle
             // hash the built verifier using SHA-256
@@ -77,11 +80,11 @@ export class Service {
                     code_challenge: challenge,
                     state: state
                 }).toString()
-                return url.toString()
+                location = url
             })
     }
 
-    exchange_token(code) {
+    exchange(code) {
         return $.ajax({
             url: this.exchange_endpoint,
             method: "POST",
@@ -93,30 +96,16 @@ export class Service {
                 code: code
             }
         }).then(res => {
-            // store the received token
-            this._set("token", res.access_token)
-            // remove the codes
-            this._remove("verifier")
-            this._remove("state")
+            // clear the session cache and store the received token
+            this.clear()
+            this.set("token", res.access_token)
         })
     }
 
-    export() {
+    fetch() {
     }
 
-    import(data) {
-    }
-}
-
-// dummy service to handle selections
-export class Dummy extends Service {
-    constructor(update) {
-        super(update)
-        this.disabled = true
-        this.name = "Select an option..."
-    }
-
-    _set(key, value) {
+    transfer(group) {
     }
 }
 

@@ -1,88 +1,75 @@
-import {Album, Artist, Group, Playlist, Track} from "./items.js"
+import {Albums, Artists, Playlist} from "./groups.js"
 import {Service} from "./service.js"
 
 const country = navigator.language.split('-')[1]
 const locale = navigator.language
 
 export class Tidal extends Service {
-    client_id = "CE49NT7wvkwoZ1s3"
-    authorization_endpoint = "https://login.tidal.com/authorize"
-    exchange_endpoint = "https://auth.tidal.com/v1/oauth2/token"
+    clientID = "CE49NT7wvkwoZ1s3"
+    authorizationEndpoint = "https://login.tidal.com/authorize"
+    exchangeEndpoint = "https://auth.tidal.com/v1/oauth2/token"
     scope = "collection.read collection.write playlists.read playlists.write"
 
+    constructor(update) {
+        super(update, "Tidal")
+    }
+
     // custom request function wrapping the ajax request with default parameters
-    request = (url, {
+    #request = (url, {
         method = "GET",
         accept = "application/vnd.api+json",
-        content_type = "application/x-www-form-urlencoded; charset=UTF-8",
+        contentType = "application/x-www-form-urlencoded; charset=UTF-8",
         ...data
     } = {}) => $.ajax({
         url: `https://openapi.tidal.com/v2/${url}`,
         method: method,
-        contentType: content_type,
-        headers: {accept: accept, Authorization: "Bearer " + this.token()},
+        contentType: contentType,
+        headers: {accept: accept, Authorization: "Bearer " + this.token},
         data: data
     })
 
-    fetch_tracks = (url, playlist, attempt = 1) => {
-        // if the url is undefined, stop the routine
-        if (!url) return
-        // otherwise, send a request to the given url
-        this.request(url + "&include=items.artists")
-            // if the request is successful, perform the operations on the yielded result
-            .done(res => {
-                // build a dictionary of included information
-                const info = Object.fromEntries(res.included.map(item => [item.id, item]))
-                // send a request to the next url
-                this.fetch_tracks(res.links.next, playlist)
-                // build tracks and add them to the playlist
-                res.data
-                    .map(track => info[track.id])
-                    .map(track => new Track({
-                        name: track.attributes.title,
-                        artists: track.relationships.artists.data?.map(artist => info[artist.id].attributes.name),
-                        isrc: track.attributes.isrc
-                    }))
-                    .forEach(track => playlist.add(track))
-                // update the angular scope to reflect changes
-                this.update()
-            })
-            // otherwise, try to call the request again after an exponential waiting time
-            .fail(_ => new Promise(handler => setTimeout(handler, 10 ** attempt))
-                .then(_ => this.fetch_tracks(url, playlist, attempt + 1))
-            )
-    }
-
-    fetch() {
+    fetchRoutine() {
         // fetch user information to get its identifier
-        return this.request("users/me")
+        return this.#request("users/me")
             // use the retrieved user id to query the user collection
-            .then(res => this.request(
-                "userCollections/" + res.data.id +
-                "?locale=" + locale +
-                "&countryCode=" + country +
-                "&include=playlists" +
-                "&include=artists" +
-                "&include=albums" +
-                "&include=albums.artists"
-            ))
+            .then(res => this.#request("userCollections/" + res.data.id + "?locale=" + locale + "&countryCode=" + country + "&include=playlists" + "&include=artists" + "&include=albums" + "&include=albums.artists"))
             // map the user collection into sets of items
             .then(res => {
                 // build a dictionary of included information
-                const info = Object.fromEntries(res.included.map(item => [item.id, item]))
-                // build the favourite artists set
-                const artists = res.data.relationships.artists.data
-                    .map(artist => info[artist.id])
-                    .map(artist => new Artist({
-                        name: artist.attributes.name
-                    }))
-                // build the favourite albums set
-                const albums = res.data.relationships.albums.data
-                    .map(album => info[album.id])
-                    .map(album => new Album({
-                        name: album.attributes.title,
-                        artists: album.relationships.artists.data?.map(artist => info[artist.id].attributes.name)
-                    }))
+                const info = Object.fromEntries(res.included.map(it => [it.id, it]))
+                // recursive fetch routine for delayed tracks fetching in playlists
+                const fetch = (url, attempt, group) => {
+                    // if the url is undefined, the fetching process is done
+                    if (!url) {
+                        group.done()
+                        this.update()
+                        return
+                    }
+                    // otherwise, send a request to the url
+                    this.#request(url + "&include=items.artists")
+                        .done(res => {
+                            // build a dictionary of included information
+                            const info = Object.fromEntries(res.included.map(it => [it.id, it]))
+                            // recursively call the routine with the next urò
+                            fetch(res.links.next, 1, group)
+                            // add each retrieved track to the playlist
+                            res.data.forEach(it => {
+                                const track = info[it.id]
+                                group.add({
+                                    name: track.attributes.title,
+                                    artists: track.relationships.artists.data.map(artist => info[artist.id].attributes.name),
+                                    isrc: track.attributes.isrc
+                                })
+                            })
+                            // update the scope
+                            this.update()
+                        })
+                        // in case of failure, try to fetch the same url after waiting an exponentially higher time
+                        .fail(_ => setTimeout(
+                            () => fetch(url, attempt + 1, group),
+                            10 ** attempt
+                        ))
+                }
                 // build the playlists
                 const playlists = res.data.relationships.playlists.data
                     .map(playlist => info[playlist.id])
@@ -90,19 +77,32 @@ export class Tidal extends Service {
                         name: playlist.attributes.name,
                         description: playlist.attributes.description,
                         open: playlist.attributes.accessType === "PUBLIC",
-                        size: playlist.attributes.numberOfItems,
-                        fetch: object => this.fetch_tracks(playlist.relationships.items.links.self, object)
+                        length: playlist.attributes.numberOfItems,
+                        routine: group => fetch(playlist.relationships.items.links.self, 1, group)
                     }))
-                // return artists and albums as group objects
-                return [
-                    new Group({name: "Favourite Artists", kind: "artists", items: artists}),
-                    new Group({name: "Favourite Albums", kind: "albums", items: albums}),
-                    ...playlists
-                ]
+                // build the favourite albums group
+                const albums = new Albums({
+                    items: res.data.relationships.albums.data.map(it => {
+                        const album = info[it.id]
+                        return {
+                            name: album.attributes.title,
+                            artists: album.relationships.artists.data.map(artist => info[artist.id].attributes.name)
+                        }
+                    })
+                })
+                // build the favourite artists groups
+                const artists = new Artists({
+                    items: res.data.relationships.artists.data.map(it => {
+                        const artist = info[it.id]
+                        return {name: artist.attributes.name}
+                    })
+                })
+                return [artists, albums, ...playlists]
             })
     }
 
-    transfer(group) {
+    transferRoutine(groups) {
+        return groups
         // for (let i = 0; i < playlists.length; i++) {
         //     // iterate over all the playlists
         //     const playlist = playlists[i]

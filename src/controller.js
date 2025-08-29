@@ -1,126 +1,158 @@
-import {redirect, Service} from "./service.js"
+import {Service} from "./service.js"
 import {Spotify} from "./spotify.js"
 import {Tidal} from "./tidal.js"
-import {Text} from "./text.js"
+import {File} from "./file.js"
 
 // dummy service to handle selections
-const dummy = new Service()
-dummy.name = "Select an option..."
-dummy.disabled = true
-dummy.set = _ => undefined
+const dummy = new Service(() => void 0, "Dummy", false)
+dummy.login = () => void 0
 
 angular.module("module", ["ngSanitize"]).controller("controller", function ($scope) {
-    // set list of available services
+    // set list of available services and default choices
     $scope.services = {
-        null: dummy,
-        Text: new Text(() => $scope.$apply()),
+        File: new File(() => $scope.$apply()),
         Tidal: new Tidal(() => $scope.$apply()),
         Spotify: new Spotify(() => $scope.$apply())
     }
-
-    // handle results and choices
-    const source = $scope.services[sessionStorage.getItem("source")]
-    const target = $scope.services[sessionStorage.getItem("target")]
-    $scope.results = undefined
     $scope.choices = {
-        source: source.token() ? source : dummy,
-        target: target.token() ? target : dummy,
-        transfer: undefined
+        source: $scope.services[sessionStorage.getItem("source")],
+        target: $scope.services[sessionStorage.getItem("target")],
+        group: undefined,
+        transfers: []
+    }
+    $scope.transferring = {
+        ongoing: false,
+        animation: "~~~~~~~~~"
     }
 
-    // handle requests failure and success, along with fetch routine
-    $scope.error = false
-    $scope.failure = (message, data) => {
-        console.warn(message, data)
-        sessionStorage.removeItem("waiting")
-        $scope.error = true
-        $scope.$apply()
+    // update handler for source and transfer change
+    $scope.update = role => {
+        // retrieve the service and set it to dummy if undefined
+        const service = $scope.choices[role] || dummy
+        // set the service name in the cache
+        sessionStorage.setItem(role, service.id)
+        // unless the service is waiting, run the authorization routine
+        if (sessionStorage.getItem("waiting") !== role) {
+            service.login({done: () => sessionStorage.setItem("waiting", role)})
+        }
+        // if the source is being changed, either reset the target service if dummy is chosen, otherwise fetch
+        if (role === "source") {
+            if (service === dummy) {
+                $scope.choices.target = undefined
+                sessionStorage.removeItem("target")
+            } else {
+                fetch()
+            }
+        }
     }
-    $scope.success = (role, service) => {
-        sessionStorage.setItem(role, service)
-        sessionStorage.removeItem("waiting")
+
+    // transfer handler for button click
+    $scope.transfer = () => {
+        $scope.choices.transfers = $scope.choices.target.transfer($scope.choices.group)
+        $scope.choices.transfers.forEach(transfer => transfer.onReady(_ => {
+            $scope.transferring.ongoing = $scope.choices.transfers.some(it => !it.ready)
+        }))
+        $scope.transferring.animation = ">~~~~~~~~"
+        animate()
     }
-    $scope.fetch = () => {
-        // if either the source and the target have not been authorized with a token, stop the routine
-        if (!$scope.choices.source.token() || !$scope.choices.target.token()) return
-        // fetch results from the source service
-        $scope.choices.source.fetch()
-            // assign the overall results and the transfer selection in case of successful request
-            .done(res => {
-                $scope.choices.transfer = res[0]
-                $scope.results = res
-                $scope.$apply()
-            })
-            // clear the session cache if the source token is wrong or expired (Error 401: Unauthorized)
-            .fail(res => {
+
+    // selection handler for batch operations
+    $scope.selection = selected => $scope.choices.group.items.map(it => it.selected = selected)
+
+    // recursive routine to animate the transfer string
+    function animate() {
+        setTimeout(() => {
+            if ($scope.transferring.ongoing) {
+                const head = $scope.transferring.animation.slice(0, -1)
+                const tail = $scope.transferring.animation.slice(-1)
+                $scope.transferring.animation = tail + head
+                animate()
+            } else {
+                $scope.transferring.animation = "~~~~~~~~~"
+            }
+            $scope.$apply()
+        }, 200)
+    }
+
+    // routine to fetch the data from the source
+    function fetch() {
+        if (!$scope.choices.source.token) return
+        $scope.choices.source.fetch({
+            done: () => {
+                $scope.error = undefined
+                sessionStorage.removeItem("waiting")
+                // take groups from $scope.choices.source in case the source has been changed in the meanwhile
+                $scope.choices.group = $scope.choices.source.groups[0]
+            },
+            fail: res => {
                 if (res.status === 401) {
+                    // if the source token is wrong or expired (Error 401: Unauthorized) clear and run the login again
                     $scope.choices.source.clear()
-                    $scope.choices.source = dummy
+                    $scope.choices.source.login({done: () => sessionStorage.setItem("waiting", "source")})
+                } else {
+                    error({
+                        service: $scope.choices.source,
+                        message: "The server responded with an error after the fetch request",
+                        restore: "source",
+                        data: res
+                    })
                 }
-                $scope.failure("Error after source export request", res)
-            })
+            }
+        })
+    }
+
+    function error({service, message, restore = undefined, data = undefined}) {
+        // set the error message and clear the local and the service cache
+        $scope.error = message
+        sessionStorage.removeItem("waiting")
+        service?.clear()
+        // if data is passed, log a warning with the given data
+        if (data) {
+            console.warn(message, data)
+        }
+        // if restore is passed, reset that service
+        if (restore) {
+            $scope.choices[restore] = undefined
+            $scope.update(restore)
+        }
     }
 
     // if an authentication code is returned, check whether a response is being waited (otherwise, clean the search)
     const params = new URLSearchParams(location.search)
     const code = params.get("code")
     if (code) {
-        // check that:
-        //   - a service is waiting for the returned code
-        //   - the yielded state is correct and run the request for the token
-        // if anything goes wrong, call the warning function with custom messages and data
+        // check that a service is waiting for the returned code, otherwise log a warning
         const waiting = sessionStorage.getItem("waiting")
         if (waiting) {
-            const [role, name] = waiting.split(" ")
-            const service = $scope.services[name]
-            if (params.get("state") === service.state()) {
-                service.exchange(code)
-                    // if the request succeeded, call the request routine and redirect to the entry point
-                    .done(_ => {
-                        console.log("here")
-                        $scope.success(role, name)
-                        location.href = redirect
+            const service = $scope.choices[waiting]
+            // check that the yielded state is correct, otherwise log a warning and clear the service cache
+            if (params.get("state") === service?.state) {
+                // try to log in with the given code
+                service.login({
+                    code: code,
+                    // in case of success, fetch the source data
+                    done: () => {
+                        sessionStorage.removeItem("waiting")
+                        $scope.error = undefined
+                        fetch()
+                    },
+                    // if anything goes wrong, log a warning, clear the service cache, and reset the source service
+                    fail: res => error({
+                        service: service,
+                        message: "The server responded with an error after token exchange request",
+                        restore: waiting,
+                        data: res
                     })
-                    // otherwise, clear the service cache and call the failure routine
-                    .fail(res => {
-                        service.clear()
-                        $scope.failure("Error after token exchange request", res)
-                    })
+                })
             } else {
-                $scope.failure("Wrong state yielded by the server", {
-                    expected: service.state(),
-                    obtained: params.get("state")
+                error({
+                    service: service,
+                    message: "The server responded with a wrong state code",
+                    data: {expected: service?.state, obtained: params.get("state")}
                 })
             }
         } else {
-            console.warn("Code received, but no service is waiting for it")
+            console.warn("A code has been received, but no service is waiting for it")
         }
-    }
-
-    // try to fetch in case both services are available
-    $scope.fetch()
-
-    // authorization handler for options
-    $scope.authorize = role => {
-        // retrieve the current service
-        const service = $scope.choices[role]
-        // if a token is already available, call the success routine and try to fetch
-        // otherwise store the waiting response flag and redirect to the authorization url
-        if (service.token()) {
-            $scope.success(role, service.name)
-            $scope.fetch()
-        } else {
-            sessionStorage.setItem("waiting", role + " " + service.name)
-            service.authorize()
-        }
-    }
-
-    $scope.transfer = () => {
-        $scope.choices.target.transfer($scope.choices.transfer)
-    }
-
-    // selection handler for batch operations
-    $scope.selection = selected => {
-        $scope.choices.transfer.items.map(item => item.selected = selected)
     }
 })

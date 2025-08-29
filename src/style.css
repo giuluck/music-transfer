@@ -9,10 +9,11 @@
     --columns: 1;
 
     @media (min-width: 768px) {
+        --font-size: 18px;
         --columns: 2;
     }
 
-    @media (min-width: 992px) {
+    @media (min-width: 1200px) {
         --font-size: 20px;
         --columns: 3;
     }
@@ -34,16 +35,19 @@ input[type=checkbox] {
     accent-color: var(--emphasis);
 }
 
-select, .nav-link.active {
+select {
     background: var(--background) !important;
 }
 
-.buttons > button {
+button {
     background: var(--items);
+    border: calc(0.07 * var(--font-size)) solid var(--foreground);
+    border-radius: 5px;
+}
+
+.buttons > button {
     font-weight: 600;
     font-size: calc(0.7 * var(--font-size));
-    border: calc(0.1 * var(--font-size)) solid var(--foreground);
-    border-radius: 5px;
     min-height: 35px;
     padding: 5px 0;
 }

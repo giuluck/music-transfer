@@ -14,6 +14,7 @@
     <script type="module" src="src/controller.js"></script>
 </head>
 <body class="d-flex flex-column align-items-center m-4">
+
 <header class="text-center">
     <h1 class="fs-1 fw-bold">
         Music Transfer
@@ -22,6 +23,7 @@
         Transfer saved playlists, tracks, albums, and artists across streaming platforms!
     </h2>
 </header>
+
 <main class="w-100 d-flex flex-column gap-4 my-4" style="max-width: 1200px">
     <div class="d-flex flex-column flex-md-row gap-1 gap-md-3 align-items-md-center">
         <label for="source" class="text-nowrap">
@@ -31,11 +33,14 @@
                 class="w-100 small"
                 style="padding: 2px 6px"
                 ng-model="choices.source"
-                ng-change="authorize('source')"
-                ng-options="s as s.name disable when s.disabled for s in services">
+                ng-init="update('source')"
+                ng-change="update('source')"
+                ng-options="service.name for service in services">
+            <option value="" disabled>Select an option...</option>
         </select>
     </div>
-    <div class="d-flex flex-column flex-md-row gap-1 gap-md-3 align-items-md-center" ng-if="choices.source.token()">
+
+    <div class="d-flex flex-column flex-md-row gap-1 gap-md-3 align-items-md-center" ng-if="choices.source.token">
         <label for="target" class="text-nowrap">
             <span class="fw-bolder">2.</span> Select your <span class="text-emphasize">target</span> service:
         </label>
@@ -43,57 +48,100 @@
                 class="w-100 small"
                 style="padding: 2px 6px"
                 ng-model="choices.target"
-                ng-change="authorize('target')"
-                ng-options="s as s.name disable when (s.disabled || s.name === choices.source.name) for s in services">
+                ng-init="update('target')"
+                ng-change="update('target')"
+                ng-options="service.name disable when service === choices.source for service in services">
+            <option value="" disabled>Select an option...</option>
         </select>
     </div>
-    <div ng-if="choices.transfer" class="d-flex flex-column gap-2">
-        <label for="transfer">
-            <span class="fw-bolder">3.</span> Select the data you want to <span class="text-emphasize">transfer</span>:
+
+    <div class="d-flex flex-column gap-2" ng-if="choices.target.token">
+        <label for="group">
+            <span class="fw-bolder">3.</span> Select the <span class="text-emphasize">group</span> you want to transfer:
         </label>
-        <select id="transfer"
+        <select id="group"
                 class="w-100 small"
                 style="padding: 2px 6px"
-                ng-model="choices.transfer"
-                ng-change="choices.transfer.fetch()"
-                ng-options="item for item in results">
+                ng-model="choices.group"
+                ng-change="choices.group.selected = true"
+                ng-options="group as group.title for group in choices.source.groups">
         </select>
         <div class="row buttons">
-            <button class="col text-decoration-underline ms-3"
-                    ng-disabled="!choices.transfer.ready()"
+            <button type="button"
+                    class="col text-decoration-underline ms-3"
+                    ng-disabled="!choices.group.ready"
                     ng-click="selection(true)">
                 Select All
             </button>
-            <button class="col text-decoration-underline mx-2"
-                    ng-disabled="!choices.transfer.ready()"
+            <button type="button"
+                    class="col text-decoration-underline mx-2"
+                    ng-disabled="!choices.group.ready"
                     ng-click="selection(false)">
                 Deselect All
             </button>
-            <button class="col text-decoration-underline text-capitalize me-3"
-                    ng-disabled="!choices.transfer.ready()"
+            <button type="button"
+                    data-bs-toggle="modal"
+                    data-bs-target="#modal"
+                    class="col text-decoration-underline text-capitalize me-3"
+                    ng-disabled="!choices.group.ready"
                     ng-click="transfer()">
-                {{choices.transfer.ready() ? "Transfer" : choices.transfer.items.length + "/" + choices.transfer.size}}
+                {{choices.group.ready ? "Transfer" : choices.group.items.length + "/" + choices.group.length}}
             </button>
         </div>
         <div class="d-grid small items">
-            <div ng-repeat="item in choices.transfer.items"
-                 class="d-flex flex-row flex-lg-row align-items-center gap-2 mx-3 my-1"
+            <div ng-repeat="item in choices.group.items"
+                 class="d-flex flex-xl-row align-items-center gap-2 mx-3 my-1"
                  ng-class="{'flex-md-row-reverse': $odd}">
                 <input type="checkbox" id="{{key}}-{{item.id}}" ng-model="item.selected"/>
                 <label for="{{key}}-{{item.id}}"
-                       class="{{item.selected ? 'fw-bold' : 'text-decoration-line-through'}}">
-                    {{item}}
+                       class="text-xl-start {{item.selected ? 'fw-bold' : 'text-decoration-line-through'}}"
+                       ng-class="{'text-md-end': $odd}">
+                    {{item.name}}
                 </label>
             </div>
         </div>
     </div>
-    <div ng-if="error" class="alert alert-danger" role="alert">
-        The server responded with an error, please try again...
+
+    <div id="modal"
+         class="modal fade"
+         data-bs-backdrop="static"
+         data-bs-keyboard="false"
+         aria-labelledby="label"
+         aria-hidden="true"
+         tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <div class="modal-title h5" id="label">
+                        {{choices.source.id}} {{transferring.animation}} {{choices.target.id}}
+                    </div>
+                </div>
+                <div class="modal-body">
+                    <div class="d-flex justify-content-between" ng-repeat="transfer in choices.transfers">
+                        <span class="fw-bold">{{transfer.name}}</span>
+                        <span class="fst-italic">
+                            {{transfer.ready ? "Transfer Completed!" : (
+                                transfer.transferred ?
+                                "Transferring " + transfer.transferred + "/" + transfer.length :
+                                "Fetching " + transfer.items.length + "/" + transfer.length
+                            )}}
+                        </span>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" data-bs-dismiss="modal" ng-disabled="transferring.ongoing">
+                        Close
+                    </button>
+                </div>
+            </div>
+        </div>
     </div>
+
+    <div ng-if="error" class="alert alert-danger" role="alert">{{error}}, please try again...</div>
 </main>
 
-{{choices.transfer.items.length}}
-{{choices.transfer.size}}
+<div ng-repeat="(name, item) in choices">
+</div>
 
 </body>
 </html>

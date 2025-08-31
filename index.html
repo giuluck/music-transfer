@@ -33,14 +33,13 @@
                 class="w-100 small"
                 style="padding: 2px 6px"
                 ng-model="choices.source"
-                ng-init="update('source')"
-                ng-change="update('source')"
-                ng-options="service.name for service in services">
-            <option value="" disabled>Select an option...</option>
+                ng-init="update()"
+                ng-change="update()"
+                ng-options="service.title disable when service.name === 'Dummy' for service in sources">
         </select>
     </div>
 
-    <div class="d-flex flex-column flex-md-row gap-1 gap-md-3 align-items-md-center" ng-if="choices.source.token">
+    <div class="d-flex flex-column flex-md-row gap-1 gap-md-3 align-items-md-center" ng-if="choices.source.logged">
         <label for="target" class="text-nowrap">
             <span class="fw-bolder">2.</span> Select your <span class="text-emphasize">target</span> service:
         </label>
@@ -48,14 +47,14 @@
                 class="w-100 small"
                 style="padding: 2px 6px"
                 ng-model="choices.target"
-                ng-init="update('target')"
-                ng-change="update('target')"
-                ng-options="service.name disable when service === choices.source for service in services">
-            <option value="" disabled>Select an option...</option>
+                ng-init="update()"
+                ng-change="update()"
+                ng-options="service.title disable when service.name === 'Dummy' for service in targets">
+            <option value="{{targetDummy}}" disabled>Select an option...</option>
         </select>
     </div>
 
-    <div class="d-flex flex-column gap-2" ng-if="choices.target.token">
+    <div class="d-flex flex-column gap-2" ng-if="choices.target.logged">
         <label for="group">
             <span class="fw-bolder">3.</span> Select the <span class="text-emphasize">group</span> you want to transfer:
         </label>
@@ -113,11 +112,11 @@
             <div class="modal-content">
                 <div class="modal-header">
                     <div class="modal-title h5" id="label">
-                        {{choices.source.id}} {{transferring.animation}} {{choices.target.id}}
+                        {{choices.source.name}} {{choices.animation}} {{choices.target.name}}
                     </div>
                 </div>
                 <div class="modal-body">
-                    <div class="d-flex justify-content-between" ng-repeat="transfer in choices.transfers">
+                    <div class="d-flex justify-content-between" ng-repeat="transfer in choices.target.transfers">
                         <span class="fw-bold">{{transfer.name}}</span>
                         <span class="fst-italic">
                             {{transfer.ready ? "Transfer Completed!" : (
@@ -129,7 +128,7 @@
                     </div>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" data-bs-dismiss="modal" ng-disabled="transferring.ongoing">
+                    <button type="button" data-bs-dismiss="modal" ng-disabled="!choices.target.finished">
                         Close
                     </button>
                 </div>
@@ -140,7 +139,8 @@
     <div ng-if="error" class="alert alert-danger" role="alert">{{error}}, please try again...</div>
 </main>
 
-<div ng-repeat="(name, item) in choices">
+<div ng-repeat="item in choices">
+    {{item.name}} {{item.logged}}
 </div>
 
 </body>

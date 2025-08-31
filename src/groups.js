@@ -1,23 +1,77 @@
-export class Group {
-    #routine
+// maps the data of an item (i.e., track, album, artist) into a standardized object with additional metadata
+function item(data) {
+    const name = data.name
+    const artist = data.artists?.at(0)
+    return {
+        name: name + (artist ? " (" + artist + ")" : ""),
+        selected: true,
+        data: data
+    }
+}
+
+// an object whose execution can be deferred
+class Deferred {
     #ready
-    #selected
     #callbacks
 
-    constructor({type, name, length, items, routine, ...data}) {
-        this.name = name
-        this.items = items ? items.map(it => item(it)) : []
-        this.length = length ? length : this.items.length
-        this.title = `${name} (${this.length} ${this.length === 1 ? "item" : "items"})`
-        this.data = {type: type, name: name, ...data}
-        this.#routine = routine ? routine : self => self.done()
+    constructor() {
+        // internal variable to keep track of whether all the execution is finished
         this.#ready = false
-        this.#selected = false
+
+        // additional callbacks to be called once the execution is finished
         this.#callbacks = []
     }
 
     get ready() {
         return this.#ready
+    }
+
+    onReady(callback) {
+        // push the callback in the list
+        this.#callbacks.push(callback)
+        // if the object is ready (i.e., the execution is finished), run the callback and clear the list
+        if (this.ready) {
+            callback()
+        }
+    }
+
+    done() {
+        // changes the ready state and runs the callbacks after (to be called from an outside handler)
+        this.#ready = true
+        for (const callback of this.#callbacks) {
+            callback()
+        }
+    }
+}
+
+// a group of items fetched from a service
+export class Group extends Deferred {
+    #routine
+    #selected
+
+    constructor({type, name, length, items, routine, ...data}) {
+        super()
+
+        // the items of the group (mapped using the utility function) or an empty list if undefined
+        this.items = items ? items.map(it => item(it)) : []
+
+        // the (expected) length of the group, or the (actual) length of its items if undefined
+        this.length = length || this.items.length
+
+        // the (short) name of the group
+        this.name = name
+
+        // the (long) title of the group
+        this.title = `${name} (${this.length} ${this.length === 1 ? "item" : "items"})`
+
+        // the inner data of the group, used to serialize it in JSON format and to restore the object later
+        this.data = {type: type, name: name, ...data}
+
+        // the (optional) routine to fetch additional data (e.g., single tracks of a playlist)
+        this.#routine = routine ? routine : self => self.done()
+
+        // whether the group was chosen for transferring to the source target
+        this.#selected = false
     }
 
     get selected() {
@@ -26,33 +80,16 @@ export class Group {
 
     set selected(value) {
         this.#selected = value
-        // when selected, run the routine and consume it by restoring an empty value after it gets called
+        // when selected, run the routine and "consume" it by restoring an empty value after it gets called
         if (value) {
             this.#routine(this)
             this.#routine = () => void 0
         }
     }
 
-    onReady(callback) {
-        if (this.ready) {
-            callback()
-            this.#callbacks = []
-        } else {
-            this.#callbacks.push(callback)
-        }
-    }
-
+    // push an additional item to the internal group items (to be called from an outside handler)
     add(data) {
         this.items.push(item(data))
-    }
-
-    done() {
-        this.#ready = true
-        this.#callbacks.forEach(callback => callback())
-    }
-
-    toJSON() {
-        return {...this.data, items: this.items.map(it => it.data)}
     }
 
     static fromJSON({type, items, ...data}) {
@@ -76,6 +113,7 @@ export class Artists extends Group {
         })
     }
 
+    // override the "add" method with class-specific parameters
     add({name}) {
         super.add({name: name})
     }
@@ -92,6 +130,7 @@ export class Albums extends Group {
         })
     }
 
+    // override the "add" method with class-specific parameters
     add({name, artists}) {
         super.add({name: name, artists: artists})
     }
@@ -108,6 +147,7 @@ export class Tracks extends Group {
         })
     }
 
+    // override the "add" method with class-specific parameters
     add({name, artists, isrc}) {
         super.add({name: name, artists: artists, isrc: isrc})
     }
@@ -126,43 +166,52 @@ export class Playlist extends Group {
         })
     }
 
+    // override the "add" method with class-specific parameters
     add({name, artists, isrc}) {
         super.add({name: name, artists: artists, isrc: isrc})
     }
 }
 
 // a group wrapper that includes transferring information
-export class Transfer extends Group {
-    constructor(group, routine) {
-        super({routine: routine, ...group.data})
-        this.transferred = undefined
-        // assign items from here rather than the constructor to avoid the call to the item() function
+export class Transfer extends Deferred {
+    #data
+
+    constructor(group) {
+        super()
+
+        // keep the group data private to be used for json dumping
+        this.#data = group.data
+
+        // set the name as the wrapped group one
+        this.name = group.name
+
+        // set the items as the group ones to keep track of their fetching
         this.items = group.items
+
+        // initially set the (expected) length as the group one
         this.length = group.length
-        // when the group items have been fetched
+
+        // the amount of transferred items (undefined until all the group items have been fetched)
+        this.transferred = undefined
+
+        // set a callback for when all the group items have been fetched
         group.onReady(() => {
-            // set the internal items as the selected items only
+            // filter the internal items to keep the select items only
             this.items = group.items.filter(it => it.selected)
+            // update the length accordingly
             this.length = this.items.length
-            // set the transferred items to zero
+            // set the transferred items to zero to indicate that the transferring can start
             this.transferred = 0
-            // assign selected to true in order to run the internal routine
-            this.selected = true
         })
     }
 
+    // increment the value of transferred items (to be called from an outside handler)
     increment(value = 1) {
         this.transferred += value
     }
-}
 
-function item(data) {
-    const name = data.name
-    const artist = data.artists?.at(0)
-    return {
-        name: name + (artist ? ` (${artist})` : ""),
-        selected: true,
-        data: data
+    toJSON() {
+        return {...this.#data, items: this.items.map(it => it.data)}
     }
 }
 

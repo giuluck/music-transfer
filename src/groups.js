@@ -131,8 +131,8 @@ export class Albums extends Group {
     }
 
     // override the "add" method with class-specific parameters
-    add({name, artists}) {
-        super.add({name: name, artists: artists})
+    add({name, artists, barcode}) {
+        super.add({name: name, artists: artists, barcode: barcode})
     }
 }
 
@@ -174,13 +174,13 @@ export class Playlist extends Group {
 
 // a group wrapper that includes transferring information
 export class Transfer extends Deferred {
-    #data
+    #status
 
     constructor(group) {
         super()
 
-        // keep the group data private to be used for json dumping
-        this.#data = group.data
+        // the group data to be used for json dumping
+        this.data = group.data
 
         // set the name as the wrapped group one
         this.name = group.name
@@ -191,8 +191,11 @@ export class Transfer extends Deferred {
         // initially set the (expected) length as the group one
         this.length = group.length
 
-        // the amount of transferred items (undefined until all the group items have been fetched)
-        this.transferred = undefined
+        // the amount of transferred items
+        this.transferred = 0
+
+        // the transferring status (1: fetching, 2: transferring, 3: completed, or 0: aborted)
+        this.#status = 1
 
         // set a callback for when all the group items have been fetched
         group.onReady(() => {
@@ -201,8 +204,21 @@ export class Transfer extends Deferred {
             // update the length accordingly
             this.length = this.items.length
             // set the transferred items to zero to indicate that the transferring can start
-            this.transferred = 0
+            this.#status = 2
         })
+    }
+
+    get status() {
+        switch (this.#status) {
+            case 3:
+                return "Transfer Completed!"
+            case 2:
+                return "Transferring " + this.transferred + "/" + this.length
+            case 1:
+                return "Fetching " + this.items.length + "/" + this.length
+            case 0:
+                return "Transferring Process Aborted"
+        }
     }
 
     // increment the value of transferred items (to be called from an outside handler)
@@ -210,8 +226,20 @@ export class Transfer extends Deferred {
         this.transferred += value
     }
 
+    // set the status to 3 (completed) when "done" is called
+    done() {
+        super.done()
+        this.#status = 3
+    }
+
+    // stops the transferring due to a request error (super call to "done", but then set the status to 0)
+    abort() {
+        super.done()
+        this.#status = 0
+    }
+
     toJSON() {
-        return {...this.#data, items: this.items.map(it => it.data)}
+        return {...this.data, items: this.items.map(it => it.data)}
     }
 }
 

@@ -54,7 +54,7 @@
         </select>
     </div>
 
-    <div class="d-flex flex-column gap-2" ng-if="choices.target.logged">
+    <div class="d-flex flex-column gap-2" ng-if="choices.source.logged && choices.target.logged">
         <label for="group">
             <span class="fw-bolder">3.</span> Select the <span class="text-emphasize">group</span> you want to transfer:
         </label>
@@ -118,13 +118,7 @@
                 <div class="modal-body">
                     <div class="d-flex justify-content-between" ng-repeat="transfer in choices.target.transfers">
                         <span class="fw-bold">{{transfer.name}}</span>
-                        <span class="fst-italic">
-                            {{transfer.ready ? "Transfer Completed!" : (
-                                transfer.transferred ?
-                                "Transferring " + transfer.transferred + "/" + transfer.length :
-                                "Fetching " + transfer.items.length + "/" + transfer.length
-                            )}}
-                        </span>
+                        <span class="fst-italic">{{transfer.status}}</span>
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -138,10 +132,6 @@
 
     <div ng-if="error" class="alert alert-danger" role="alert">{{error}}, please try again...</div>
 </main>
-
-<div ng-repeat="item in choices">
-    {{item.name}} {{item.logged}}
-</div>
 
 </body>
 </html>

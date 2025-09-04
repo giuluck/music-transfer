@@ -13,7 +13,6 @@ angular.module("module", ["ngSanitize"]).controller("controller", function ($sco
         group: undefined,
         animation: undefined
     }
-    console.log(Object.values($scope.sources).map(it => it.selected))
     const services = {source: sourceDummy, target: targetDummy}
 
     // if a code can be retrieved in the location, use the "waiting" flag to understand which service is waiting

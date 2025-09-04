@@ -173,7 +173,7 @@ class Service {
         return this.#selected
     }
 
-    select(value) {
+    select() {
         this.#selected = true
         sessionStorage.setItem(this.#role, this.name)
     }
@@ -257,7 +257,7 @@ export class TargetService extends Service {
         return this.#finished
     }
 
-    transfer({group, apply = () => void 0}) {
+    transfer({group, apply = _ => void 0}) {
         // if the input is a Group instance build a list out of it, otherwise handle the "all" object
         const groups = group instanceof Group ? [group] : group.items.filter(it => it.selected)
         // build a new transfer object for each single group and start the transfer when the group is ready
@@ -272,7 +272,7 @@ export class TargetService extends Service {
                 transferred++
                 this.#finished = transferred === groups.length
             })
-            groups[i].onReady(_ => this.#transfer(this.transfers[i], apply))
+            groups[i].onReady(_ => this.#transfer({transfer: this.transfers[i], apply: apply}))
         }
     }
 }

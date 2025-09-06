@@ -10,6 +10,13 @@ function generate(length) {
         .reduce((output, value) => output + alphanumeric[value % alphanumeric.length], "")
 }
 
+// waits for a number of seconds equal to: attempt ** 2 + random(0, 5)
+function wait(attempt, routine) {
+    const time = Math.floor(1000 * (attempt ** 2 + 5 * Math.random()))
+    console.warn("Failure after attempt " + (attempt + 1) + ", waiting time " + time + "ms before trying again")
+    new Promise(handler => setTimeout(handler, time)).then(routine).catch(_ => void 0)
+}
+
 class Service {
     #role
     #token
@@ -181,47 +188,32 @@ export class SourceService extends Service {
         return this.#all ? [this.#all, ...this.#all.items] : []
     }
 
-    fetchRecursive({url, routine, request, apply, attempt = 0}) {
-        return group => {
-            // always start the routine after an exponentially higher time (to be increased after failures)
-            new Promise(handler => setTimeout(handler, 10 ** attempt)).then(() => {
-                // if the url is undefined, the fetching process is done
-                if (!url) {
-                    group.done()
+    fetchRoutine({url, routine, request, apply}) {
+        // create a function to recursively fetch items until a new link is given 
+        const fetchRecursive = (link, group, attempt = 0) => {
+            // if the link is undefined, the fetching process is done, otherwise send a request to the url
+            if (!link) {
+                group.done()
+                apply()
+            } else {
+                request(link, this.token).done(res => {
+                    // in case of success, retrieve the new url from the routine and add the new items to the group
+                    // then recursively call the routine resetting the attempt to zero
+                    const output = routine(res)
+                    output.items.forEach(it => group.add(it))
+                    fetchRecursive(output.url, group)
                     apply()
-                    return
-                }
-                // otherwise, send a request to the url:
-                //   - retrieve the new url from the routine and add the new items to the group
-                //   - in case of success, reset the attempt, otherwise increment it
-                //   - eventually, run the recursive fetch routine and apply changes
-                request(url, this.token)
-                    .then(res => {
-                        const output = routine(res)
-                        output.items.forEach(it => group.add(it))
-                        return output.url
-                    })
-                    .done(newUrl => {
-                        url = newUrl
-                        attempt = 0
-                    })
-                    .fail(res => {
-                        console.warn("Error during recursive fetching", res)
-                        attempt = attempt + 1
-                    })
-                    .always(_ => {
-                        this.fetchRecursive({
-                            url: url,
-                            routine: routine,
-                            request: request,
-                            apply: apply,
-                            attempt: attempt + 1
-                        })(group)
-                        apply()
-                    })
-            })
+                }).fail(res => {
+                    // otherwise, log a warning and call the routine with the same parameters after the waiting time
+                    console.warn("Error during recursive fetch", res)
+                    wait(attempt, () => fetchRecursive(link, group, attempt + 1))
+                })
+            }
         }
+        // return the fetch routine as a call to the recursive function given a group
+        return group => fetchRecursive(url, group)
     }
+
 
     fetch({done = _ => void 0, fail = _ => void 0, apply = _ => void 0}) {
         // if the service was already fetched, call the "done" routine (no need to apply)
@@ -269,47 +261,68 @@ export class TargetService extends Service {
         return this.#finished
     }
 
-    transferRecursive({requests, transfer, apply, attempt = 0}) {
-        // always start the routine after an exponentially higher time (to be increased after failures)
-        new Promise(handler => setTimeout(handler, 10 ** attempt)).then(() => {
-            // if the transferred items are equal to the total number, stop the routine since the transferring is done
-            if (transfer.transferred === transfer.items.length) {
-                transfer.done()
-                apply()
-                return
-            }
-            // otherwise, send a request to the url
-            requests(
-                this.token,
-                increment => {
-                    transfer.increment(increment)
-                    this.transferRecursive({
-                        requests: requests,
-                        transfer: transfer,
-                        apply: apply,
-                        attempt: attempt,
-                    })
-                    apply()
-                },
-                res => {
-                    console.warn("Error during recursive transfer", res)
-                    this.transferRecursive({
-                        requests: requests,
-                        transfer: transfer,
-                        apply: apply,
-                        attempt: attempt + 1,
-                    })
-                }
-            ).fail(res => {
-                console.warn("Error during recursive getting in transfer", res)
-                this.transferRecursive({
-                    requests: requests,
+    transferRoutine({query, push, limit, transfer, apply}) {
+        // if the transferred items are equal to the total number, stop the routine since the transferring is done
+        if (transfer.transferred === transfer.items.length) {
+            transfer.done()
+            apply()
+            return
+        }
+        // otherwise, get the slice of items ("limit" items from "transferred") and build an empty retrieved list
+        const items = transfer.items.slice(transfer.transferred, transfer.transferred + limit).map(it => it.data)
+        const retrieved = []
+        // build a recursive push routine which pushed the queried data
+        const pushRecursive = (data, attempt = 0) =>
+            push(data).done(_ => {
+                // every item that is not in the pushed data (indexed by name) goes in the missing list
+                data = new Set(data.map(it => it.name))
+                transfer.missing.push(...items.filter(it => !data.has(it.name)))
+                this.transferRoutine({
+                    query: query,
+                    push: push,
+                    limit: limit,
                     transfer: transfer,
                     apply: apply,
-                    attempt: attempt,
                 })
+                apply()
+            }).fail(res => {
+                console.warn("Error during recursive push", res)
+                wait(attempt, () => pushRecursive(attempt + 1))
             })
-        })
+        // build a recursive query routine that queries a single item
+        // (this is due to the fact that services provide filtering options to search for one item at the time)
+        const queryRecursive = (item, attempt = 0) =>
+            query(item).then(res => {
+                // if no items are returned, push undefined, otherwise build a custom object with name and data
+                retrieved.push(res.length === 0 ? undefined : {name: item.name, data: res[0]})
+            }).done(_ => {
+                // increment the number of transfer elements by one to update the view
+                transfer.increment(1)
+                // proceed with the push only when all the expected elements have been retrieved
+                if (retrieved.length === items.length) {
+                    const data = retrieved.filter(it => it !== undefined)
+                    if (data.length === 0) {
+                        // if no item was found, directly put all the items in the missing list without passing
+                        // through the "push" routine (as it might return an error due to empty data list)
+                        transfer.missing.push(...items)
+                        this.transferRoutine({
+                            query: query,
+                            push: push,
+                            limit: limit,
+                            transfer: transfer,
+                            apply: apply,
+                        })
+                        apply()
+                    } else {
+                        pushRecursive(data)
+                    }
+                }
+            }).fail(res => {
+                console.warn("Error during recursive query", res)
+                wait(attempt, () => queryRecursive(item, attempt + 1))
+            })
+        // for each sliced items, start the recursive query routine
+        items.forEach(item => queryRecursive(item))
     }
 
     transfer({group, apply = _ => void 0}) {

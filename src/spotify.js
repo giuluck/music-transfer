@@ -36,7 +36,7 @@ function fetch({done, fail, apply}) {
         fail: fail,
         done: _ => {
             // build the routine to fetch favourite artists
-            const artistsRoutine = this.fetchRecursive({
+            const artistsRoutine = this.fetchRoutine({
                 url: "https://api.spotify.com/v1/me/following?type=artist&limit=50",
                 routine: res => {
                     const items = res.artists.items.filter(artist => artist).map(artist => new Object({name: artist.name}))
@@ -46,7 +46,7 @@ function fetch({done, fail, apply}) {
                 apply: apply
             })
             // build the routine to fetch favourite albums
-            const albumsRoutine = this.fetchRecursive({
+            const albumsRoutine = this.fetchRoutine({
                 url: "https://api.spotify.com/v1/me/albums?limit=50",
                 routine: res => {
                     const items = res.items.map(album => album.album).filter(album => album).map(album => new Object({
@@ -60,7 +60,7 @@ function fetch({done, fail, apply}) {
                 apply: apply
             })
             // build the routine to fetch favourite tracks
-            const tracksRoutine = this.fetchRecursive({
+            const tracksRoutine = this.fetchRoutine({
                 url: "https://api.spotify.com/v1/me/tracks?limit=50",
                 routine: res => {
                     const items = res.items.map(track => track.track).filter(track => track).map(track => new Object({
@@ -74,7 +74,7 @@ function fetch({done, fail, apply}) {
                 apply: apply
             })
             //build the items routine to fetch playlist items given the playlist id
-            const itemsRoutine = playlist => this.fetchRecursive({
+            const itemsRoutine = playlist => this.fetchRoutine({
                 url: "https://api.spotify.com/v1/playlists/" + playlist.id + "/tracks?limit=100",
                 routine: res => {
                     const items = res.items.map(item => item.track).filter(item => item).map(item => new Object({
@@ -88,7 +88,7 @@ function fetch({done, fail, apply}) {
                 apply: apply
             })
             // build the routine to fetch playlists information (using internally the routine to fetch its items)
-            const playlistsRoutine = this.fetchRecursive({
+            const playlistsRoutine = this.fetchRoutine({
                 url: "https://api.spotify.com/v1/me/playlists?limit=50",
                 routine: res => {
                     const items = res.items.filter(playlist => playlist).map(playlist => new Playlist(
@@ -119,57 +119,94 @@ function transfer({transfer, apply}) {
     this.check({
         apply: apply,
         fail: () => transfer.abort(),
-        done: _ => {
-            // spotify does not allow to query multiple items, hence it is not possible to group several items together
-            const item = transfer.items[transfer.transferred]
+        done: user => {
+            let query
+            let push
+            // assign the variables depending on the datatype
             switch (transfer.data.type) {
                 case "artists":
+                    // query as many artists as possible using the name
+                    // then filter for those whose name is exactly the one we look for and return the first result
+                    query = artist => request(
+                        "https://api.spotify.com/v1/search?limit=50&type=artist&q=artist:" + artist.name,
+                        this.token
+                    ).then(res => res.artists.items.filter(it => it.name.toLowerCase() === artist.name.toLowerCase()).map(it => it.id).slice(0, 1))
+                    push = data => request(
+                        "https://api.spotify.com/v1/me/following?type=artist",
+                        this.token,
+                        {method: "PUT", ids: data.map(it => it.data)}
+                    )
                     break
                 case "albums":
-                    this.transferRecursive({
-                        requests: (token, done, fail) =>
-                            request("https://api.spotify.com/v1/search?type=album&limit=1&q=upc:" + item.data.upc, token)
-                                .then(res => {
-                                    const ids = res.albums.items.map(album => album.id)
-                                    if (ids.length === 0) {
-                                        transfer.missing.push(item)
-                                        done(1)
-                                    } else {
-                                        request(
-                                            "https://api.spotify.com/v1/me/albums",
-                                            token,
-                                            {method: "PUT", ids: ids}
-                                        ).done(_ => done(1)).fail(fail)
-                                    }
-                                }),
-                        transfer: transfer,
-                        apply: apply
-                    })
+                    query = album => request(
+                        "https://api.spotify.com/v1/search?limit=1&type=album&q=upc:" + album.upc,
+                        this.token
+                    ).then(res => res.albums.items.map(it => it.id))
+                    push = data => request(
+                        "https://api.spotify.com/v1/me/albums",
+                        this.token,
+                        {method: "PUT", ids: data.map(it => it.data)}
+                    )
                     break
                 case "tracks":
-                    this.transferRecursive({
-                        requests: (token, done, fail) =>
-                            request("https://api.spotify.com/v1/search?type=track&limit=1&q=isrc:" + item.data.isrc, token)
-                                .then(res => {
-                                    const ids = res.tracks.items.map(track => track.id)
-                                    if (ids.length === 0) {
-                                        transfer.missing.push(item)
-                                        done(1)
-                                    } else {
-                                        request(
-                                            "https://api.spotify.com/v1/me/tracks",
-                                            token,
-                                            {method: "PUT", ids: ids}
-                                        ).done(_ => done(1)).fail(fail)
-                                    }
-                                }),
-                        transfer: transfer,
-                        apply: apply
+                    query = track => request(
+                        "https://api.spotify.com/v1/search?limit=1&type=track&q=isrc:" + track.isrc,
+                        this.token
+                    ).then(res => res.tracks.items.map(it => it.id))
+                    push = data => request(
+                        "https://api.spotify.com/v1/me/tracks",
+                        this.token,
+                        {method: "PUT", ids: data.map(it => it.data)}
+                    )
+                    break
+                case "playlist":
+                    // use a different strategy for playlists, i.e.:
+                    //   > first post a request to build the playlist using the user id and the playlist data
+                    //   > then call the transferRoutine routine to post tracks on the newly created playlist
+                    request(
+                        "https://api.spotify.com/v1/users/" + user.id + "/playlists",
+                        this.token, {
+                            method: "POST",
+                            name: transfer.data.name,
+                            description: transfer.data.description,
+                            public: transfer.data.open
+                        }
+                    ).done(playlist => this.transferRoutine({
+                            query: item => request(
+                                "https://api.spotify.com/v1/search?limit=1&type=track&q=isrc:" + item.isrc,
+                                this.token
+                            ).then(res => res.tracks.items.map(it => it.uri)),
+                            push: data => request(
+                                "https://api.spotify.com/v1/playlists/" + playlist.id + "/tracks",
+                                this.token,
+                                {method: "POST", uris: data.map(it => it.data)}
+                            ),
+                            limit: 50,
+                            transfer: transfer,
+                            apply: apply
+                        })
+                    ).fail(res => {
+                        // in case of failure, wait between 0 and 10 seconds before trying again
+                        const time = Math.floor(10000 * Math.random())
+                        console.warn("Error during playlist creation, waiting " + time + "ms before trying again", res)
+                        new Promise(handler => setTimeout(handler, time))
+                            .then(() => this.transfer({transfer: transfer, apply: apply}))
+                            .catch(_ => void 0)
                     })
-                    break
-                case "playlists":
-                    break
+                    return
+                default:
+                    console.warn("Unexpected group type " + transfer.data.type)
+                    transfer.abort()
+                    return
             }
+            // call the transferRoutine routine setting the routine with the given variables
+            this.transferRoutine({
+                query: query,
+                push: push,
+                limit: 50,
+                transfer: transfer,
+                apply: apply
+            })
         }
     })
 }

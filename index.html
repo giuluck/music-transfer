@@ -70,13 +70,13 @@
                     class="col text-decoration-underline ms-3"
                     ng-disabled="!choices.group.ready"
                     ng-click="selection(true)">
-                Select All
+                All ({{choices.group.items.length}})
             </button>
             <button type="button"
                     class="col text-decoration-underline mx-2"
                     ng-disabled="!choices.group.ready"
                     ng-click="selection(false)">
-                Deselect All
+                None
             </button>
             <button type="button"
                     data-bs-toggle="modal"

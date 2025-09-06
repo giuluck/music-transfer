@@ -1,4 +1,4 @@
-import {Albums, All, Artists, Playlist, Tracks} from "./groups.js"
+import {Albums, All, Artists, Playlist, Tracks, Transfer} from "./groups.js"
 import {SourceService, TargetService} from "./service.js"
 
 const data = {
@@ -41,7 +41,7 @@ function fetch({done, fail, apply}) {
         done: res => {
             const user = {id: res.data.id, country: res.data.attributes.country, locale: navigator.language}
             // build the routine to fetch favourite artists
-            const artistsRoutine = this.fetchRecursive({
+            const artistsRoutine = this.fetchRoutine({
                 url: "userCollections/" + user.id + "/relationships/artists?countryCode=" + user.country + "&locale=" + user.locale + "&include=artists",
                 routine: res => {
                     const info = Object.fromEntries(res.included?.map(it => [it.id, it]) || [])
@@ -52,7 +52,7 @@ function fetch({done, fail, apply}) {
                 apply: apply
             })
             // build the routine to fetch favourite albums
-            const albumsRoutine = this.fetchRecursive({
+            const albumsRoutine = this.fetchRoutine({
                 url: "userCollections/" + user.id + "/relationships/albums?countryCode=" + user.country + "&locale=" + user.locale + "&include=albums.artists",
                 routine: res => {
                     const info = Object.fromEntries(res.included?.map(it => [it.id, it]) || [])
@@ -67,7 +67,7 @@ function fetch({done, fail, apply}) {
                 apply: apply
             })
             // build the routine to fetch favourite tracks
-            const tracksRoutine = this.fetchRecursive({
+            const tracksRoutine = this.fetchRoutine({
                 url: "userCollections/" + user.id + "/relationships/tracks?countryCode=" + user.country + "&locale=" + user.locale + "&include=tracks.artists",
                 routine: res => {
                     const info = Object.fromEntries(res.included?.map(it => [it.id, it]) || [])
@@ -82,7 +82,7 @@ function fetch({done, fail, apply}) {
                 apply: apply
             })
             //build the items routine to fetch playlist items given the playlist id
-            const itemsRoutine = playlist => this.fetchRecursive({
+            const itemsRoutine = playlist => this.fetchRoutine({
                 url: "/playlists/" + playlist.id + "/relationships/items?countryCode=" + user.country + "&include=items.artists",
                 routine: res => {
                     const info = Object.fromEntries(res.included?.map(it => [it.id, it]) || [])
@@ -97,7 +97,7 @@ function fetch({done, fail, apply}) {
                 apply: apply
             })
             // build the routine to fetch playlists information (using internally the routine to fetch its items)
-            const playlistsRoutine = this.fetchRecursive({
+            const playlistsRoutine = this.fetchRoutine({
                 url: "userCollections/" + user.id + "/relationships/playlists?countryCode=" + user.country + "&locale=" + user.locale + "&include=playlists",
                 routine: res => {
                     const info = Object.fromEntries(res.included?.map(it => [it.id, it]) || [])
@@ -127,84 +127,139 @@ function fetch({done, fail, apply}) {
 
 
 function transfer({transfer, apply}) {
-    // const transferRoutine = (item, country, index = 0, attempt = 0) => {
-    //     // always start the routine after an exponentially higher time (to be increased after failures)
-    //     new Promise(handler => setTimeout(handler, 10 ** attempt)).then(() => {
-    //         // if the items length is surpassed, stop the routine since the transferring is done
-    //         if (index >= transfer.items.length) {
-    //             transfer.done()
-    //             return
-    //         }
-    //         const tracks = transfer.items.slice(index, index + 20).map(it => it.data.isrc)
-    //         // otherwise, start from requesting the data of up to 20 tracks using the ISRC as identifier
-    //         request(
-    //             "tracks?countryCode=" + country + tracks.map(isrc => "&filter[isrc]=" + isrc).join(""),
-    //             this.token
-    //         ).done(res => {
-    //             // map the results into a dictionary indexed by isrc to guarantee that the results are correctly ordered
-    //             const ids = Object.fromEntries(res.data.map(it => [it.attributes.isrc, it.id]))
-    //             // if the request goes well, use the retrieved data to get the track IDs and add them to the playlist, then:
-    //             //  - update the number of transferred items and proceed with the next recursive call in case of success
-    //             //  - or restart the routine at the current step increasing the number of attempts
-    //             request(
-    //                 "playlists/" + item + "/relationships/items?countryCode=" + country,
-    //                 this.token, {
-    //                     method: "POST",
-    //                     accept: "*/*",
-    //                     contentType: "application/vnd.api+json",
-    //                     data: tracks.map(isrc => ids[isrc]).map(id => new Object({id: id, type: "tracks"}))
-    //                 }
-    //             ).done(_ => {
-    //                 transfer.increment(res.data.length)
-    //                 transferRoutine(item, index + 20, 0)
-    //             }).fail(_ => transferRoutine(item, index, attempt + 1)).always(apply)
-    //         }).fail(_ => transferRoutine(item, index, attempt + 1)).always(apply)
-    //     })
-    // }
+    // handle favourite tracks since the APIs do not support this yet (i.e., transform Tracks group into Playlist)
+    if (transfer.data.type === "tracks") {
+        alert("Transferring favourite tracks is not yet possible on Tidal.\nYou will find your tracks in a new playlist.")
+        const playlist = new Playlist(
+            transfer.items,
+            {
+                name: "Favourite Tracks",
+                description: "Favourite Tracks Playlist (automatically generated from Music Transfer)",
+                open: false
+            }
+        )
+        transfer = new Transfer(playlist)
+    }
+    // start with a safety check by calling the spotify api to get user information
     this.check({
         apply: apply,
         fail: () => transfer.abort(),
         done: res => {
             const user = {id: res.data.id, country: res.data.attributes.country, locale: navigator.language}
-            switch (transfer.type) {
+            let query
+            let push
+            // assign the variables depending on the datatype
+            switch (transfer.data.type) {
                 case "artists":
+                    // query by artist name then filter for name matching and return the first result
+                    query = artist => request(
+                        "searchResults/" + artist.name + "?include=artists&countryCode=" + user.country,
+                        this.token
+                    ).then(res => res.included.filter(it => it.attributes.name.toLowerCase() === artist.name.toLowerCase()).map(it => it.id).slice(0, 1))
+                    push = data => request(
+                        "userCollections/" + user.id + "/relationships/artists?countryCode=" + user.country,
+                        this.token,
+                        {
+                            method: "POST",
+                            accept: "*/*",
+                            contentType: "application/vnd.api+json",
+                            data: data.map(it => new Object({id: it.data, type: "artists"}))
+                        }
+                    )
                     break
                 case "albums":
+                    query = album => request(
+                        "albums?countryCode=" + user.country + "&filter[barcodeId]=" + album.upc,
+                        this.token
+                    ).then(res => res.data.map(it => it.id))
+                    push = data => request(
+                        "userCollections/" + user.id + "/relationships/albums?countryCode=" + user.country,
+                        this.token,
+                        {
+                            method: "POST",
+                            accept: "*/*",
+                            contentType: "application/vnd.api+json",
+                            data: data.map(it => new Object({id: it.data, type: "albums"}))
+                        }
+                    )
                     break
                 case "tracks":
+                    query = track => request(
+                        "tracks?countryCode=" + user.country + "&filter[isrc]=" + track.isrc,
+                        this.token
+                    ).then(res => res.data.map(it => it.id))
+                    push = data => request(
+                        "userCollections/" + user.id + "/relationships/tracks?countryCode=" + user.country,
+                        this.token,
+                        {
+                            method: "POST",
+                            accept: "*/*",
+                            contentType: "application/vnd.api+json",
+                            data: data.map(it => new Object({id: it.data, type: "tracks"}))
+                        }
+                    )
                     break
-                case "playlists":
-                    const tracks = transfer.items.slice(index, index + 20).map(it => it.data.isrc)
-                    this.transferRecursive({
-                        get_url: "tracks?countryCode=" + user.country + tracks.map(isrc => "&filter[isrc]=" + isrc).join(""),
+                case "playlist":
+                    // use a different strategy for playlists, i.e.:
+                    //   > first post a request to build the playlist using the user id and the playlist data
+                    //   > then call the transferRoutine routine to post tracks on the newly created playlist
+                    request(
+                        "playlists?countryCode=" + user.country,
+                        this.token, {
+                            method: "POST",
+                            accept: "*/*",
+                            contentType: "application/vnd.api+json",
+                            data: {
+                                type: "playlists",
+                                attributes: {
+                                    name: transfer.data.name,
+                                    description: transfer.data.description,
+                                    accessType: transfer.data.open ? "PUBLIC" : "UNLISTED"
+                                }
+                            }
+                        }
+                    ).done(playlist => {
+                        this.transferRoutine({
+                            query: track => request(
+                                "tracks?countryCode=" + user.country + "&filter[isrc]=" + track.isrc,
+                                this.token
+                            ).then(res => res.data.map(it => it.id)),
+                            push: data => request(
+                                "playlists/" + playlist.data.id + "/relationships/items?countryCode=" + user.country,
+                                this.token,
+                                {
+                                    method: "POST",
+                                    accept: "*/*",
+                                    contentType: "application/vnd.api+json",
+                                    data: data.map(it => new Object({id: it.data, type: "tracks"}))
+                                }
+                            ),
+                            limit: 20,
+                            transfer: transfer,
+                            apply: apply
+                        })
+                    }).fail(res => {
+                        // in case of failure, wait between 0 and 10 seconds before trying again
+                        const time = Math.floor(10000 * Math.random())
+                        console.warn("Error during playlist creation, waiting " + time + "ms before trying again", res)
+                        new Promise(handler => setTimeout(handler, time))
+                            .then(() => this.transfer({transfer: transfer, apply: apply}))
+                            .catch(_ => void 0)
                     })
-            }
-
-
-            // use the retrieved user id to build the various query links
-            request(
-                "playlists?countryCode=" + user.country,
-                this.token, {
-                    method: "POST",
-                    contentType: "application/vnd.api+json",
-                    data: {
-                        attributes: {
-                            name: transfer.data.name,
-                            description: transfer.data.description,
-                            accessType: transfer.data.open ? "PUBLIC" : "UNLISTED"
-                        },
-                        type: "playlists"
-                    }
-                }
-            )
-                // in case of success, start to fill the new playlist using its id
-                .done(res => transferRoutine(res.data.id))
-                // otherwise, call the abort function and stop
-                .fail(res => {
+                    return
+                default:
+                    console.warn("Unexpected group type " + transfer.data.type)
                     transfer.abort()
-                    console.warn("Error when creating new playlist: " + transfer.name, res)
-                })
-                .always(apply)
+                    return
+            }
+            // call the transferRoutine routine setting the routine with the given variables
+            this.transferRoutine({
+                query: query,
+                push: push,
+                limit: 20,
+                transfer: transfer,
+                apply: apply
+            })
         }
     })
 }

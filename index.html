@@ -20,7 +20,7 @@
         Music Transfer
     </h1>
     <h2 class="fs-5 fw-light text-decoration-underline">
-        Transfer saved playlists, tracks, albums, and artists across streaming platforms!
+        Transfer your favourite artists, albums, tracks, and playlists across streaming platforms!
     </h2>
 </header>
 
@@ -35,7 +35,7 @@
                 ng-model="choices.source"
                 ng-init="update()"
                 ng-change="update()"
-                ng-options="service.title disable when service.name === 'Dummy' for service in sources">
+                ng-options="service as service.title disable when service.name === 'Dummy' for service in sources">
         </select>
     </div>
 
@@ -49,7 +49,7 @@
                 ng-model="choices.target"
                 ng-init="update()"
                 ng-change="update()"
-                ng-options="service.title disable when service.name === 'Dummy' for service in targets">
+                ng-options="service as service.title disable when service.name === 'Dummy' for service in targets">
             <option value="{{targetDummy}}" disabled>Select an option...</option>
         </select>
     </div>
@@ -63,7 +63,7 @@
                 style="padding: 2px 6px"
                 ng-model="choices.group"
                 ng-change="choices.group.selected = true"
-                ng-options="group as group.title for group in choices.source.groups">
+                ng-options="group as group.name for group in choices.source.groups">
         </select>
         <div class="row buttons">
             <button type="button"
@@ -84,7 +84,7 @@
                     class="col text-decoration-underline text-capitalize me-3"
                     ng-disabled="!choices.group.ready"
                     ng-click="transfer()">
-                {{choices.group.ready ? "Transfer" : choices.group.items.length + "/" + choices.group.length}}
+                {{choices.group.ready ? "Transfer" : choices.group.items.length + " items..."}}
             </button>
         </div>
         <div class="d-grid small items">
@@ -116,9 +116,30 @@
                     </div>
                 </div>
                 <div class="modal-body">
-                    <div class="d-flex justify-content-between" ng-repeat="transfer in choices.target.transfers">
-                        <span class="fw-bold">{{transfer.name}}</span>
-                        <span class="fst-italic">{{transfer.status}}</span>
+                    <div class="row my-2" ng-repeat="transfer in choices.target.transfers">
+                        <span class="col-6 fw-bold">{{transfer.name}}</span>
+                        <span class="col-6 d-flex justify-content-end fst-italic">
+                            {{transfer.status}}
+                            <a ng-if="transfer.ready"
+                               class="ms-1"
+                               data-bs-toggle="collapse"
+                               href="#missing-{{$index}}"
+                               role="button"
+                               aria-expanded="false"
+                               aria-controls="missing-{{$index}}"
+                            >+</a>
+                        </span>
+                        <div class="collapse" id="missing-{{$index}}">
+                            <div class="card card-body">
+                                <span class="h6">Missing Items</span>
+                                <ul ng-if="transfer.missing.length > 0">
+                                    <li ng-repeat="missing in transfer.missing">{{missing.name}}</li>
+                                </ul>
+                                <span ng-if="transfer.missing.length === 0">
+                                    All the items have been correctly transferred!
+                                </span>
+                            </div>
+                        </div>
                     </div>
                 </div>
                 <div class="modal-footer">

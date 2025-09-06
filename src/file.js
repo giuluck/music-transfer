@@ -1,5 +1,5 @@
 import {SourceService, TargetService} from "./service.js"
-import {Group} from "./groups.js";
+import {All, Group} from "./groups.js";
 
 const data = {
     name: "File",
@@ -7,7 +7,7 @@ const data = {
 }
 
 function transfer({transfer}) {
-    transfer.increment(transfer.length)
+    transfer.increment(transfer.items.length)
     transfer.done()
     if (this.finished) {
         const name = this.transfers.length === 1 ? `_${transfer.name.replaceAll(" ", "_")}` : ""
@@ -28,12 +28,16 @@ function fetch({done, fail}) {
         // if everything goes well, run the "done" routine using the parsed groups as inputs
         const content = sessionStorage.getItem("contentFile")
         const groups = JSON.parse(content).map(Group.fromJSON)
-        done(groups)
+        done(new All(groups))
     } catch (exception) {
         // otherwise, clear the cache and run the "fail" routine
         this.clear()
         fail(exception)
     }
+}
+
+function check({done}) {
+    done()
 }
 
 class SourceFile extends SourceService {
@@ -47,10 +51,11 @@ class SourceFile extends SourceService {
         })
     }
 
-    // when deselected, clear the cache so that selecting it again will open up another modal window
+    // when deselected, clear the cache so that selecting it again will open up another modal window (+ reset status)
     deselect() {
         super.deselect()
         this.clear()
+        this.fetched = false
     }
 
     clear() {
@@ -88,6 +93,6 @@ class SourceFile extends SourceService {
     }
 }
 
-export const sourceFile = new SourceFile({fetch: fetch, ...data})
+export const sourceFile = new SourceFile({fetch: fetch, check: check, ...data})
 
-export const targetFile = new TargetService({token: () => true, transfer: transfer, ...data})
+export const targetFile = new TargetService({token: () => true, transfer: transfer, check: check, ...data})

@@ -1,2 +1,6 @@
-_ music-transfer
-A service to transfer music playlists across streaming platforms 
+## A service to transfer your favourite artists, albums, tracks, and playlists across streaming platforms!
+
+Currently supported:
+* ***Spotify*** (read/write)
+* ***Tidal*** (read/write)
+* ***Local File (.json)*** (read/write)

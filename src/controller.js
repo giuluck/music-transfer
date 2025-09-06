@@ -95,6 +95,22 @@ angular.module("module", ["ngSanitize"]).controller("controller", function ($sco
                 apply: apply
             })
         }
+        // if the target is logged, test that everything is working
+        const target = services.target
+        if (target.logged) {
+            target.check({
+                fail: res => {
+                    // if the token is wrong or expired (Error 401) clear the service and select it again
+                    if (res.status === 401) {
+                        target.clear()
+                        target.login({fail: err => failAuthentication(err, true), apply: apply})
+                    } else {
+                        failFetching(res)
+                    }
+                },
+                apply: apply
+            })
+        }
     }
 
     // transfer handler for button click

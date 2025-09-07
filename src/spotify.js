@@ -2,7 +2,7 @@ import {Albums, All, Artists, Playlist, Tracks} from "./groups.js"
 import {SourceService, TargetService} from "./service.js"
 
 const data = {
-    name: "Spotify",
+    name: "spotify",
     title: "Spotify",
     token: {
         clientID: "d45c460b9f56492ea9c297993d7efdb7",
@@ -39,7 +39,12 @@ function fetch({done, fail, apply}) {
             const artistsRoutine = this.fetchRoutine({
                 url: "https://api.spotify.com/v1/me/following?type=artist&limit=50",
                 routine: res => {
-                    const items = res.artists.items.filter(artist => artist).map(artist => new Object({name: artist.name}))
+                    const items = res.artists.items
+                        .filter(artist => artist && artist.id)
+                        .map(artist => new Object({
+                            spotify: artist.id,
+                            name: artist.name
+                        }))
                     return {url: res.artists.next, items: items}
                 },
                 request: request,
@@ -49,11 +54,15 @@ function fetch({done, fail, apply}) {
             const albumsRoutine = this.fetchRoutine({
                 url: "https://api.spotify.com/v1/me/albums?limit=50",
                 routine: res => {
-                    const items = res.items.map(album => album.album).filter(album => album).map(album => new Object({
-                        name: album.name,
-                        artists: album.artists.map(artist => artist.name),
-                        upc: album.external_ids.upc
-                    }))
+                    const items = res.items
+                        .map(album => album.album)
+                        .filter(album => album && album.id)
+                        .map(album => new Object({
+                            spotify: album.id,
+                            name: album.name,
+                            artists: album.artists.map(artist => artist.name),
+                            upc: album.external_ids.upc
+                        }))
                     return {url: res.next, items: items}
                 },
                 request: request,
@@ -63,11 +72,15 @@ function fetch({done, fail, apply}) {
             const tracksRoutine = this.fetchRoutine({
                 url: "https://api.spotify.com/v1/me/tracks?limit=50",
                 routine: res => {
-                    const items = res.items.map(track => track.track).filter(track => track).map(track => new Object({
-                        name: track.name,
-                        artists: track.artists.map(artist => artist.name),
-                        isrc: track.external_ids.isrc
-                    }))
+                    const items = res.items
+                        .map(track => track.track)
+                        .filter(track => track && track.id)
+                        .map(track => new Object({
+                            spotify: track.id,
+                            name: track.name,
+                            artists: track.artists.map(artist => artist.name),
+                            isrc: track.external_ids.isrc
+                        }))
                     return {url: res.next, items: items}
                 },
                 request: request,
@@ -77,11 +90,15 @@ function fetch({done, fail, apply}) {
             const itemsRoutine = playlist => this.fetchRoutine({
                 url: "https://api.spotify.com/v1/playlists/" + playlist.id + "/tracks?limit=100",
                 routine: res => {
-                    const items = res.items.map(item => item.track).filter(item => item).map(item => new Object({
-                        name: item.name,
-                        artists: item.artists.map(artist => artist.name),
-                        isrc: item.external_ids.isrc
-                    }))
+                    const items = res.items
+                        .map(item => item.track)
+                        .filter(item => item && item.id)
+                        .map(item => new Object({
+                            spotify: item.id,
+                            name: item.name,
+                            artists: item.artists.map(artist => artist.name),
+                            isrc: item.external_ids.isrc
+                        }))
                     return {url: res.next, items: items}
                 },
                 request: request,
@@ -134,7 +151,7 @@ function transfer({transfer, apply}) {
                     push = data => request(
                         "https://api.spotify.com/v1/me/following?type=artist",
                         this.token,
-                        {method: "PUT", ids: data.map(it => it.data)}
+                        {method: "PUT", ids: data.map(it => it.spotify)}
                     )
                     break
                 case "albums":
@@ -145,7 +162,7 @@ function transfer({transfer, apply}) {
                     push = data => request(
                         "https://api.spotify.com/v1/me/albums",
                         this.token,
-                        {method: "PUT", ids: data.map(it => it.data)}
+                        {method: "PUT", ids: data.map(it => it.spotify)}
                     )
                     break
                 case "tracks":
@@ -156,7 +173,7 @@ function transfer({transfer, apply}) {
                     push = data => request(
                         "https://api.spotify.com/v1/me/tracks",
                         this.token,
-                        {method: "PUT", ids: data.map(it => it.data)}
+                        {method: "PUT", ids: data.map(it => it.spotify)}
                     )
                     break
                 case "playlist":
@@ -175,23 +192,20 @@ function transfer({transfer, apply}) {
                             query: item => request(
                                 "https://api.spotify.com/v1/search?limit=1&type=track&q=isrc:" + item.isrc,
                                 this.token
-                            ).then(res => res.tracks.items.map(it => it.uri)),
+                            ).then(res => res.tracks.items.map(it => it.id)),
                             push: data => request(
                                 "https://api.spotify.com/v1/playlists/" + playlist.id + "/tracks",
                                 this.token,
-                                {method: "POST", uris: data.map(it => it.data)}
+                                {method: "POST", uris: data.map(it => "spotify:track:" + it.spotify)}
                             ),
                             limit: 50,
                             transfer: transfer,
                             apply: apply
                         })
                     ).fail(res => {
-                        // in case of failure, wait between 0 and 10 seconds before trying again
-                        const time = Math.floor(10000 * Math.random())
-                        console.warn("Error during playlist creation, waiting " + time + "ms before trying again", res)
-                        new Promise(handler => setTimeout(handler, time))
-                            .then(() => this.transfer({transfer: transfer, apply: apply}))
-                            .catch(_ => void 0)
+                        // in case of failure, wait 2 seconds before trying again
+                        console.warn("Error during playlist creation, retrying in 2 seconds", res)
+                        setTimeout(() => this.transfer({transfer: transfer, apply: apply}), 2000)
                     })
                     return
                 default:

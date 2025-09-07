@@ -2,7 +2,7 @@ import {SourceService, TargetService} from "./service.js"
 import {All, Group} from "./groups.js";
 
 const data = {
-    name: "File",
+    name: "file",
     title: "Local File (.json)"
 }
 
@@ -26,7 +26,7 @@ function fetch({done, fail}) {
     // try to read the content of the file from the cache
     try {
         // if everything goes well, run the "done" routine using the parsed groups as inputs
-        const content = sessionStorage.getItem("contentFile")
+        const content = sessionStorage.getItem("fileContent")
         const groups = JSON.parse(content).map(Group.fromJSON)
         done(new All(groups))
     } catch (exception) {
@@ -42,11 +42,11 @@ function check({done}) {
 
 class SourceFile extends SourceService {
     constructor({name, title, fetch}) {
-        const file = sessionStorage.getItem("tokenFile")
+        const file = sessionStorage.getItem("fileToken")
         super({
             name: name,
             title: file ? file : title,
-            token: () => sessionStorage.getItem("tokenFile"),
+            token: () => sessionStorage.getItem("fileToken"),
             fetch: fetch
         })
     }
@@ -60,8 +60,8 @@ class SourceFile extends SourceService {
 
     clear() {
         this.title = "Local File (.json)"
-        sessionStorage.removeItem("tokenFile")
-        sessionStorage.removeItem("contentFile")
+        sessionStorage.removeItem("fileToken")
+        sessionStorage.removeItem("fileContent")
     }
 
     login({done = () => void 0, fail = () => void 0, apply = () => void 0}) {
@@ -79,8 +79,8 @@ class SourceFile extends SourceService {
             reader.onload = () => {
                 // if the reading succeeded, update the token and the cache, then run the "done" routine
                 this.title = file.name
-                sessionStorage.setItem("tokenFile", file.name)
-                sessionStorage.setItem("contentFile", reader.result.toString())
+                sessionStorage.setItem("fileToken", file.name)
+                sessionStorage.setItem("fileContent", reader.result.toString())
                 done()
                 apply()
             }

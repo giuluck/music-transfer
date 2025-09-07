@@ -10,11 +10,17 @@ function generate(length) {
         .reduce((output, value) => output + alphanumeric[value % alphanumeric.length], "")
 }
 
-// waits for a number of seconds equal to: attempt ** 2 + random(0, 5)
-function wait(attempt, routine) {
-    const time = Math.floor(1000 * (attempt ** 2 + 5 * Math.random()))
-    console.warn("Failure after attempt " + (attempt + 1) + ", waiting time " + time + "ms before trying again")
-    new Promise(handler => setTimeout(handler, time)).then(routine).catch(_ => void 0)
+// handles failure in recursive routines
+function failure({res, attempt, message, retry, abort}) {
+    // if the res status is "too many requests", 2 seconds times attempt number before retrying
+    // otherwise log a warning with the given message and run the "abort" routine
+    if (res.status === 429) {
+        console.warn("Error during recursive routine, retrying in 2 seconds", res)
+        setTimeout(retry, 2000 * attempt)
+    } else {
+        console.warn(message, res)
+        abort()
+    }
 }
 
 class Service {
@@ -36,7 +42,7 @@ class Service {
         this.#check = check
 
         // if the token is an object, the function to get the token consists in loading it from the session storage
-        this.#token = typeof token === "object" ? () => sessionStorage.getItem("token" + this.name) : token
+        this.#token = typeof token === "object" ? () => sessionStorage.getItem(this.name + "Token") : token
 
         // if the token is an object, it contains the credentials, otherwise no authorization is needed for the service
         this.#credentials = typeof token === "object" ? token : undefined
@@ -80,9 +86,9 @@ class Service {
 
     // clears the cache of the service
     clear() {
-        sessionStorage.removeItem("token" + this.name)
-        sessionStorage.removeItem("state" + this.name)
-        sessionStorage.removeItem("verifier" + this.name)
+        sessionStorage.removeItem(this.name + "Token")
+        sessionStorage.removeItem(this.name + "State")
+        sessionStorage.removeItem(this.name + "Verifier")
     }
 
     // tries to log into the service in order to get the access token
@@ -95,8 +101,8 @@ class Service {
         // otherwise, build and store random state and code verifier for the payload (saved in the storage)
         const state = generate(16)
         const verifier = generate(64)
-        sessionStorage.setItem("state" + this.name, state)
-        sessionStorage.setItem("verifier" + this.name, verifier)
+        sessionStorage.setItem(this.name + "State", state)
+        sessionStorage.setItem(this.name + "Verifier", verifier)
         // perform cryptographic operations to get the code challenge from the verifier
         crypto.subtle
             // hash the built verifier using SHA-256
@@ -135,8 +141,8 @@ class Service {
             done()
             return
         }
-        const expectedState = sessionStorage.getItem("state" + this.name)
-        const verifier = sessionStorage.getItem("verifier" + this.name)
+        const expectedState = sessionStorage.getItem(this.name + "State")
+        const verifier = sessionStorage.getItem(this.name + "Verifier")
         // if the yielded state is correct, perform the post request using the returned code
         // otherwise, run the failure routine (no need to call apply to update the scope)
         this.clear()
@@ -152,7 +158,7 @@ class Service {
                     code: code
                 }
                 // if everything goes well, clear the cache and store the obtained token
-            }).then(res => sessionStorage.setItem("token" + this.name, res.access_token))
+            }).then(res => sessionStorage.setItem(this.name + "Token", res.access_token))
                 .done(done)
                 .fail(fail)
                 .always(() => {
@@ -196,18 +202,23 @@ export class SourceService extends Service {
                 group.done()
                 apply()
             } else {
+                // in case of success, retrieve the new url from the routine and add the new items to the group
+                // otherwise, in case of full failure (abort), stop the fetching
                 request(link, this.token).done(res => {
-                    // in case of success, retrieve the new url from the routine and add the new items to the group
-                    // then recursively call the routine resetting the attempt to zero
                     const output = routine(res)
-                    output.items.forEach(it => group.add(it))
                     fetchRecursive(output.url, group)
+                    group.add(output.items)
                     apply()
-                }).fail(res => {
-                    // otherwise, log a warning and call the routine with the same parameters after the waiting time
-                    console.warn("Error during recursive fetch", res)
-                    wait(attempt, () => fetchRecursive(link, group, attempt + 1))
-                })
+                }).fail(res => failure({
+                    res: {link: link, ...res},
+                    attempt: attempt + 1,
+                    message: "Error during recursive fetch",
+                    retry: () => fetchRecursive(link, group, attempt + 1),
+                    abort: () => {
+                        group.done()
+                        apply()
+                    }
+                }))
             }
         }
         // return the fetch routine as a call to the recursive function given a group
@@ -262,67 +273,84 @@ export class TargetService extends Service {
     }
 
     transferRoutine({query, push, limit, transfer, apply}) {
-        // if the transferred items are equal to the total number, stop the routine since the transferring is done
-        if (transfer.transferred === transfer.items.length) {
-            transfer.done()
-            apply()
-            return
+        let items = transfer.items.map(it => it.data)
+        // build a recursive push routine which pushes the queried data in batches of "limit" size
+        const pushRecursive = (index = 0, attempt = 0) => {
+            const batch = items.slice(index, index + limit)
+            if (batch.length === 0) {
+                // if the sliced data is empty, the transferring is done
+                transfer.done()
+            } else {
+                // otherwise, try to push the batch and call the recursive function with updated index
+                push(batch)
+                    .done(_ => {
+                        transfer.increment(batch.length)
+                        pushRecursive(index + batch.length)
+                    })
+                    .fail(res => failure({
+                        res: {data: batch, ...res},
+                        attempt: attempt + 1,
+                        message: "Error during recursive push",
+                        retry: () => pushRecursive(index, attempt + 1),
+                        abort: () => {
+                            // in case of full failure also add the batch to the missing list
+                            transfer.missing.push(...batch)
+                            transfer.increment(batch.length)
+                            pushRecursive(index + batch.length)
+                        },
+                    }))
+                    .always(apply)
+            }
         }
-        // otherwise, get the slice of items ("limit" items from "transferred") and build an empty retrieved list
-        const items = transfer.items.slice(transfer.transferred, transfer.transferred + limit).map(it => it.data)
-        const retrieved = []
-        // build a recursive push routine which pushed the queried data
-        const pushRecursive = (data, attempt = 0) =>
-            push(data).done(_ => {
-                // every item that is not in the pushed data (indexed by name) goes in the missing list
-                data = new Set(data.map(it => it.name))
-                transfer.missing.push(...items.filter(it => !data.has(it.name)))
-                this.transferRoutine({
-                    query: query,
-                    push: push,
-                    limit: limit,
-                    transfer: transfer,
-                    apply: apply,
-                })
-                apply()
-            }).fail(res => {
-                console.warn("Error during recursive push", res)
-                wait(attempt, () => pushRecursive(attempt + 1))
-            })
         // build a recursive query routine that queries a single item
         // (this is due to the fact that services provide filtering options to search for one item at the time)
-        const queryRecursive = (item, attempt = 0) =>
-            query(item).then(res => {
-                // if no items are returned, push undefined, otherwise build a custom object with name and data
-                retrieved.push(res.length === 0 ? undefined : {name: item.name, data: res[0]})
-            }).done(_ => {
-                // increment the number of transfer elements by one to update the view
+        const queryRecursive = (index = 0, attempt = 0) => {
+            const item = items[index]
+            if (item[this.name] !== undefined) {
+                // if the data relative to this service is already available, increment the number of transferred items
                 transfer.increment(1)
-                // proceed with the push only when all the expected elements have been retrieved
-                if (retrieved.length === items.length) {
-                    const data = retrieved.filter(it => it !== undefined)
-                    if (data.length === 0) {
-                        // if no item was found, directly put all the items in the missing list without passing
-                        // through the "push" routine (as it might return an error due to empty data list)
-                        transfer.missing.push(...items)
-                        this.transferRoutine({
-                            query: query,
-                            push: push,
-                            limit: limit,
-                            transfer: transfer,
-                            apply: apply,
-                        })
-                        apply()
-                    } else {
-                        pushRecursive(data)
-                    }
+                // unless the service was already available from before (attempt = 0), wait 0.5 seconds (attempt = 1)
+                setTimeout(() => queryRecursive(index + 1), 500 * attempt)
+                // when all the items have been transferred, keep only those that have service data (non-missing)
+                // then reset the number of transferred items and start to push them into the service
+                if (transfer.items.length === transfer.transferred) {
+                    items = items.filter(it => it[this.name] !== null)
+                    transfer.increment(-items.length)
+                    pushRecursive()
                 }
-            }).fail(res => {
-                console.warn("Error during recursive query", res)
-                wait(attempt, () => queryRecursive(item, attempt + 1))
-            })
-        // for each sliced items, start the recursive query routine
-        items.forEach(item => queryRecursive(item))
+            } else {
+                // otherwise, query the item and store the first result in the service data (or null if no results)
+                query(item)
+                    .done(res => {
+                        // if the result is empty, set the service data to null and add the item to the missing list
+                        // otherwise, assign the service data as the first result
+                        if (res.length === 0) {
+                            item[this.name] = null
+                            transfer.missing.push(item)
+                        } else {
+                            item[this.name] = res[0]
+                        }
+                        // call the recursive routine on the index itself to get into the base case with service data
+                        // set "attempt" to 1 to force waiting some time before the next call
+                        queryRecursive(index, 1)
+                    })
+                    .fail(res => failure({
+                        res: {item: item, ...res},
+                        attempt: attempt + 1,
+                        message: "Error during recursive query",
+                        retry: () => queryRecursive(index, attempt + 1),
+                        abort: () => {
+                            // in case of full failure also set the service data to null and add it to the missing list
+                            item[this.name] = null
+                            transfer.missing.push(item)
+                            queryRecursive(index, 1)
+                        }
+                    }))
+                    .always(apply)
+            }
+        }
+        // start the query routine from the first item
+        queryRecursive()
     }
 
     transfer({group, apply = _ => void 0}) {
@@ -347,13 +375,13 @@ export class TargetService extends Service {
 }
 
 export const sourceDummy = new SourceService({
-    name: "Dummy",
+    name: "dummy",
     title: "Select an option...",
     token: () => false
 })
 
 export const targetDummy = new TargetService({
-    name: "Dummy",
+    name: "dummy",
     title: "Select an option...",
     token: () => false
 })

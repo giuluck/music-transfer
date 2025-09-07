@@ -94,7 +94,7 @@ export class Group extends Deferred {
 
     // push an additional item to the internal group items (to be called from an outside handler)
     add(data) {
-        this.items.push(item(data))
+        this.items.push(...data.map(item))
     }
 
     static fromJSON({type, items, ...data}) {
@@ -111,21 +111,11 @@ export class Artists extends Group {
     constructor(items) {
         super(items, "artists", "Favourite Artists")
     }
-
-    // override the "add" method with class-specific parameters
-    add({name}) {
-        super.add({name: name})
-    }
 }
 
 export class Albums extends Group {
     constructor(items) {
         super(items, "albums", "Favourite Albums")
-    }
-
-    // override the "add" method with class-specific parameters
-    add({name, artists, upc}) {
-        super.add({name: name, artists: artists, upc: upc})
     }
 }
 
@@ -133,21 +123,11 @@ export class Tracks extends Group {
     constructor(items) {
         super(items, "tracks", "Favourite Tracks")
     }
-
-    // override the "add" method with class-specific parameters
-    add({name, artists, isrc}) {
-        super.add({name: name, artists: artists, isrc: isrc})
-    }
 }
 
 export class Playlist extends Group {
     constructor(items, {name, description, open}) {
         super(items, "playlist", name, {description: description, open: open})
-    }
-
-    // override the "add" method with class-specific parameters
-    add({name, artists, isrc}) {
-        super.add({name: name, artists: artists, isrc: isrc})
     }
 }
 
@@ -157,15 +137,15 @@ export class All extends Group {
         // pass the routine to the super constructor
         super(routine, "all", undefined)
         // add the already fetched items to itself
-        items.forEach(it => this.add(it))
+        this.add(items)
         // then set "selected" to true to start the additional items fetching routine
         this.selected = true
         // set the initial name
         this.name = `ALL (${this.items.length} ${this.items.length === 1 ? "GROUP" : "GROUPS"})`
     }
 
-    add(group) {
-        this.items.push(group)
+    add(groups) {
+        this.items.push(...groups)
         this.name = `ALL (${this.items.length} ${this.items.length === 1 ? "GROUP" : "GROUPS"})`
     }
 }
@@ -207,11 +187,11 @@ export class Transfer extends Deferred {
     get status() {
         switch (this.#status) {
             case 3:
-                return (this.transferred - this.missing.length) + " transferred; " + this.missing.length + " missing"
+                return "Completed (" + this.missing.length + " missing)"
             case 2:
-                return "Transferring " + (this.transferred - this.missing.length) + " items..."
+                return (this.transferred - this.missing.length) + " transferred; " + this.missing.length + " missing..."
             case 1:
-                return "Fetching " + this.items.length + " items..."
+                return this.items.length + " fetched..."
             case 0:
                 return "Transferring Process Aborted"
         }

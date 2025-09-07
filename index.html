@@ -120,8 +120,7 @@
                         <span class="col-6 fw-bold">{{transfer.name}}</span>
                         <span class="col-6 d-flex justify-content-end fst-italic">
                             {{transfer.status}}
-                            <a ng-if="transfer.ready"
-                               class="ms-1"
+                            <a class="ms-1 text-decoration-none"
                                data-bs-toggle="collapse"
                                href="#missing-{{$index}}"
                                role="button"
@@ -132,11 +131,11 @@
                         <div class="collapse" id="missing-{{$index}}">
                             <div class="card card-body">
                                 <span class="h6">Missing Items</span>
-                                <ul ng-if="transfer.missing.length > 0">
+                                <ul>
                                     <li ng-repeat="missing in transfer.missing">{{missing.name}}</li>
                                 </ul>
                                 <span ng-if="transfer.missing.length === 0">
-                                    All the items have been correctly transferred!
+                                    There is currently no missing item!
                                 </span>
                             </div>
                         </div>

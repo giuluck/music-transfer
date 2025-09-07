@@ -5,8 +5,8 @@ import {sourceSpotify, targetSpotify} from "./spotify.js"
 
 angular.module("module", ["ngSanitize"]).controller("controller", function ($scope) {
     // set list of available services and default choices (set source and target to a dummy service if none is selected)
-    $scope.sources = {Dummy: sourceDummy, File: sourceFile, Tidal: sourceTidal, Spotify: sourceSpotify}
-    $scope.targets = {Dummy: targetDummy, File: targetFile, Tidal: targetTidal, Spotify: targetSpotify}
+    $scope.sources = {dummy: sourceDummy, file: sourceFile, tidal: sourceTidal, spotify: sourceSpotify}
+    $scope.targets = {dummy: targetDummy, file: targetFile, tidal: targetTidal, spotify: targetSpotify}
     $scope.choices = {
         source: Object.values($scope.sources).filter(it => it.selected)[0] || sourceDummy,
         target: Object.values($scope.targets).filter(it => it.selected)[0] || targetDummy,

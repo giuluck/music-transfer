@@ -1,8 +1,8 @@
-import {Albums, All, Artists, Playlist, Tracks, Transfer} from "./groups.js"
+import {Albums, All, Artists, Playlist, Tracks} from "./groups.js"
 import {SourceService, TargetService} from "./service.js"
 
 const data = {
-    name: "Tidal",
+    name: "tidal",
     title: "Tidal",
     token: {
         clientID: "CE49NT7wvkwoZ1s3",
@@ -45,7 +45,13 @@ function fetch({done, fail, apply}) {
                 url: "userCollections/" + user.id + "/relationships/artists?countryCode=" + user.country + "&locale=" + user.locale + "&include=artists",
                 routine: res => {
                     const info = Object.fromEntries(res.included?.map(it => [it.id, it]) || [])
-                    const items = res.data.map(artist => info[artist.id]).filter(artist => artist).map(artist => new Object({name: artist.attributes.name}))
+                    const items = res.data
+                        .map(artist => info[artist.id])
+                        .filter(artist => artist && artist.id)
+                        .map(artist => new Object({
+                            tidal: artist.id,
+                            name: artist.attributes.name
+                        }))
                     return {url: res.links.next, items: items}
                 },
                 request: request,
@@ -56,11 +62,15 @@ function fetch({done, fail, apply}) {
                 url: "userCollections/" + user.id + "/relationships/albums?countryCode=" + user.country + "&locale=" + user.locale + "&include=albums.artists",
                 routine: res => {
                     const info = Object.fromEntries(res.included?.map(it => [it.id, it]) || [])
-                    const items = res.data.map(album => info[album.id]).filter(album => album).map(album => new Object({
-                        name: album.attributes.title,
-                        artists: album.relationships.artists.data.map(artist => info[artist.id].attributes.name),
-                        upc: album.attributes.barcodeId
-                    }))
+                    const items = res.data
+                        .map(album => info[album.id])
+                        .filter(album => album && album.id)
+                        .map(album => new Object({
+                            tidal: album.id,
+                            name: album.attributes.title,
+                            artists: album.relationships.artists.data.map(artist => info[artist.id]?.attributes?.name).filter(artist => artist),
+                            upc: album.attributes.barcodeId
+                        }))
                     return {url: res.links.next, items: items}
                 },
                 request: request,
@@ -71,11 +81,15 @@ function fetch({done, fail, apply}) {
                 url: "userCollections/" + user.id + "/relationships/tracks?countryCode=" + user.country + "&locale=" + user.locale + "&include=tracks.artists",
                 routine: res => {
                     const info = Object.fromEntries(res.included?.map(it => [it.id, it]) || [])
-                    const items = res.data.map(track => info[track.id]).filter(track => track).map(track => new Object({
-                        name: track.attributes.title,
-                        artists: track.relationships.artists.data.map(artist => info[artist.id].attributes.name),
-                        isrc: track.attributes.isrc
-                    }))
+                    const items = res.data
+                        .map(track => info[track.id])
+                        .filter(track => track && track.id)
+                        .map(track => new Object({
+                            tidal: track.id,
+                            name: track.attributes.title,
+                            artists: track.relationships.artists.data.map(artist => info[artist.id]?.attributes?.name).filter(artist => artist),
+                            isrc: track.attributes.isrc
+                        }))
                     return {url: res.links.next, items: items}
                 },
                 request: request,
@@ -86,11 +100,15 @@ function fetch({done, fail, apply}) {
                 url: "/playlists/" + playlist.id + "/relationships/items?countryCode=" + user.country + "&include=items.artists",
                 routine: res => {
                     const info = Object.fromEntries(res.included?.map(it => [it.id, it]) || [])
-                    const items = res.data.map(item => info[item.id]).filter(item => item).map(item => new Object({
-                        name: item.attributes.title,
-                        artists: item.relationships.artists.data.map(artist => info[artist.id].attributes.name),
-                        isrc: item.attributes.isrc
-                    }))
+                    const items = res.data
+                        .map(item => info[item.id])
+                        .filter(item => item && item.id)
+                        .map(item => new Object({
+                            tidal: item.id,
+                            name: item.attributes.title,
+                            artists: item.relationships.artists.data.map(artist => info[artist.id]?.attributes?.name).filter(artist => artist),
+                            isrc: item.attributes.isrc
+                        }))
                     return {url: res.links.next, items: items}
                 },
                 request: request,
@@ -127,19 +145,6 @@ function fetch({done, fail, apply}) {
 
 
 function transfer({transfer, apply}) {
-    // handle favourite tracks since the APIs do not support this yet (i.e., transform Tracks group into Playlist)
-    if (transfer.data.type === "tracks") {
-        alert("Transferring favourite tracks is not yet possible on Tidal.\nYou will find your tracks in a new playlist.")
-        const playlist = new Playlist(
-            transfer.items,
-            {
-                name: "Favourite Tracks",
-                description: "Favourite Tracks Playlist (automatically generated from Music Transfer)",
-                open: false
-            }
-        )
-        transfer = new Transfer(playlist)
-    }
     // start with a safety check by calling the spotify api to get user information
     this.check({
         apply: apply,
@@ -163,7 +168,7 @@ function transfer({transfer, apply}) {
                             method: "POST",
                             accept: "*/*",
                             contentType: "application/vnd.api+json",
-                            data: data.map(it => new Object({id: it.data, type: "artists"}))
+                            data: data.map(it => new Object({id: it.tidal, type: "artists"}))
                         }
                     )
                     break
@@ -179,26 +184,69 @@ function transfer({transfer, apply}) {
                             method: "POST",
                             accept: "*/*",
                             contentType: "application/vnd.api+json",
-                            data: data.map(it => new Object({id: it.data, type: "albums"}))
+                            data: data.map(it => new Object({id: it.tidal, type: "albums"}))
                         }
                     )
                     break
                 case "tracks":
-                    query = track => request(
-                        "tracks?countryCode=" + user.country + "&filter[isrc]=" + track.isrc,
-                        this.token
-                    ).then(res => res.data.map(it => it.id))
-                    push = data => request(
-                        "userCollections/" + user.id + "/relationships/tracks?countryCode=" + user.country,
-                        this.token,
-                        {
+                    // query = track => request(
+                    //     "tracks?countryCode=" + user.country + "&filter[isrc]=" + track.isrc,
+                    //     this.token
+                    // ).then(res => res.data.map(it => it.id))
+                    // push = data => request(
+                    //     "userCollections/" + user.id + "/relationships/tracks?countryCode=" + user.country,
+                    //     this.token,
+                    //     {
+                    //         method: "POST",
+                    //         accept: "*/*",
+                    //         contentType: "application/vnd.api+json",
+                    //         data: data.map(it => new Object({id: it.tidal, type: "tracks"}))
+                    //     }
+                    // )
+                    // break
+                    alert("Transferring favourite tracks is not yet possible on Tidal.\nYou will find your tracks in a new playlist.")
+                    // handle favourite tracks using the same strategy of playlists since the APIs do not support this
+                    request(
+                        "playlists?countryCode=" + user.country,
+                        this.token, {
                             method: "POST",
                             accept: "*/*",
                             contentType: "application/vnd.api+json",
-                            data: data.map(it => new Object({id: it.data, type: "tracks"}))
+                            data: {
+                                type: "playlists",
+                                attributes: {
+                                    name: "Favourite Tracks",
+                                    description: "Favourite Tracks Playlist (automatically generated from Music Transfer)",
+                                    accessType: "UNLISTED"
+                                }
+                            }
                         }
-                    )
-                    break
+                    ).done(playlist => {
+                        this.transferRoutine({
+                            query: track => request(
+                                "tracks?countryCode=" + user.country + "&filter[isrc]=" + track.isrc,
+                                this.token
+                            ).then(res => res.data.map(it => it.id)),
+                            push: data => request(
+                                "playlists/" + playlist.data.id + "/relationships/items?countryCode=" + user.country,
+                                this.token,
+                                {
+                                    method: "POST",
+                                    accept: "*/*",
+                                    contentType: "application/vnd.api+json",
+                                    data: data.map(it => new Object({id: it.tidal, type: "tracks"}))
+                                }
+                            ),
+                            limit: 20,
+                            transfer: transfer,
+                            apply: apply
+                        })
+                    }).fail(res => {
+                        // in case of failure, wait 2 seconds before trying again
+                        console.warn("Error during playlist creation, retrying in 2 seconds", res)
+                        setTimeout(() => this.transfer({transfer: transfer, apply: apply}), 2000)
+                    })
+                    return
                 case "playlist":
                     // use a different strategy for playlists, i.e.:
                     //   > first post a request to build the playlist using the user id and the playlist data
@@ -231,7 +279,7 @@ function transfer({transfer, apply}) {
                                     method: "POST",
                                     accept: "*/*",
                                     contentType: "application/vnd.api+json",
-                                    data: data.map(it => new Object({id: it.data, type: "tracks"}))
+                                    data: data.map(it => new Object({id: it.tidal, type: "tracks"}))
                                 }
                             ),
                             limit: 20,
@@ -239,12 +287,9 @@ function transfer({transfer, apply}) {
                             apply: apply
                         })
                     }).fail(res => {
-                        // in case of failure, wait between 0 and 10 seconds before trying again
-                        const time = Math.floor(10000 * Math.random())
-                        console.warn("Error during playlist creation, waiting " + time + "ms before trying again", res)
-                        new Promise(handler => setTimeout(handler, time))
-                            .then(() => this.transfer({transfer: transfer, apply: apply}))
-                            .catch(_ => void 0)
+                        // in case of failure, wait between 2000 seconds before trying again
+                        console.warn("Error during playlist creation, retrying in 2 seconds", res)
+                        setTimeout(() => this.transfer({transfer: transfer, apply: apply}), 2000)
                     })
                     return
                 default:

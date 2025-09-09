@@ -1,42 +1,22 @@
 import {Albums, All, Artists, Playlist, Tracks} from "./groups.js"
-import {SourceService, TargetService} from "./service.js"
+import {Service} from "./service.js"
 
-const data = {
-    name: "spotify",
-    title: "Spotify",
-    token: {
-        clientID: "d45c460b9f56492ea9c297993d7efdb7",
-        authorizationEndpoint: "https://accounts.spotify.com/authorize",
-        exchangeEndpoint: "https://accounts.spotify.com/api/token",
-        scope: "playlist-read-private playlist-read-collaborative playlist-modify-private playlist-modify-public user-follow-read user-follow-modify user-library-read user-library-modify"
+
+export class Spotify extends Service {
+    constructor(apply) {
+        super(apply, "Spotify", undefined, {
+            clientID: "d45c460b9f56492ea9c297993d7efdb7",
+            authorizationEndpoint: "https://accounts.spotify.com/authorize",
+            exchangeEndpoint: "https://accounts.spotify.com/api/token",
+            scope: "playlist-read-private playlist-read-collaborative playlist-modify-private playlist-modify-public user-follow-read user-follow-modify user-library-read user-library-modify"
+        })
     }
-}
 
-// custom spotify request
-function request(url, token, {
-    method = "GET",
-    ...data
-} = {}) {
-    return $.ajax({
-        url: url,
-        method: method,
-        headers: {Authorization: "Bearer " + token},
-        data: $.isEmptyObject(data) ? undefined : JSON.stringify(data)
-    })
-}
-
-function check({done, fail, apply}) {
-    request("https://api.spotify.com/v1/me", this.token).done(done).fail(fail).always(apply)
-}
-
-function fetch({done, fail, apply}) {
-    // start with a safety check by calling the spotify api to get user information
-    this.check({
-        apply: apply,
-        fail: fail,
-        done: _ => {
+    _fetch() {
+        // build an empty jQuery promise to be consistent with the return type
+        return $.when().then(_ => {
             // build the routine to fetch favourite artists
-            const artistsRoutine = this.fetchRoutine({
+            const artistsRoutine = this._fetchRoutine({
                 url: "https://api.spotify.com/v1/me/following?type=artist&limit=50",
                 routine: res => {
                     const items = res.artists.items
@@ -46,12 +26,10 @@ function fetch({done, fail, apply}) {
                             name: artist.name
                         }))
                     return {url: res.artists.next, items: items}
-                },
-                request: request,
-                apply: apply
+                }
             })
             // build the routine to fetch favourite albums
-            const albumsRoutine = this.fetchRoutine({
+            const albumsRoutine = this._fetchRoutine({
                 url: "https://api.spotify.com/v1/me/albums?limit=50",
                 routine: res => {
                     const items = res.items
@@ -64,12 +42,10 @@ function fetch({done, fail, apply}) {
                             upc: album.external_ids.upc
                         }))
                     return {url: res.next, items: items}
-                },
-                request: request,
-                apply: apply
+                }
             })
             // build the routine to fetch favourite tracks
-            const tracksRoutine = this.fetchRoutine({
+            const tracksRoutine = this._fetchRoutine({
                 url: "https://api.spotify.com/v1/me/tracks?limit=50",
                 routine: res => {
                     const items = res.items
@@ -82,30 +58,26 @@ function fetch({done, fail, apply}) {
                             isrc: track.external_ids.isrc
                         }))
                     return {url: res.next, items: items}
-                },
-                request: request,
-                apply: apply
+                }
             })
             //build the items routine to fetch playlist items given the playlist id
-            const itemsRoutine = playlist => this.fetchRoutine({
+            const itemsRoutine = playlist => this._fetchRoutine({
                 url: "https://api.spotify.com/v1/playlists/" + playlist.id + "/tracks?limit=100",
                 routine: res => {
                     const items = res.items
                         .map(item => item.track)
                         .filter(item => item && item.id)
                         .map(item => new Object({
-                            spotify: item.id,
+                            spotify: item.uri,
                             name: item.name,
                             artists: item.artists.map(artist => artist.name),
                             isrc: item.external_ids.isrc
                         }))
                     return {url: res.next, items: items}
-                },
-                request: request,
-                apply: apply
+                }
             })
             // build the routine to fetch playlists information (using internally the routine to fetch its items)
-            const playlistsRoutine = this.fetchRoutine({
+            const playlistsRoutine = this._fetchRoutine({
                 url: "https://api.spotify.com/v1/me/playlists?limit=50",
                 routine: res => {
                     const items = res.items.filter(playlist => playlist).map(playlist => new Playlist(
@@ -115,28 +87,21 @@ function fetch({done, fail, apply}) {
                             open: playlist.public
                         }))
                     return {url: res.next, items: items}
-                },
-                request: request,
-                apply: apply
+                }
             })
             // build the "All" object with already built items and the routine to fetch all the playlists
-            const all = new All([
+            return new All([
                 new Artists(artistsRoutine),
                 new Albums(albumsRoutine),
                 new Tracks(tracksRoutine)
             ], playlistsRoutine)
-            // rune the "done" routine
-            done(all)
-        }
-    })
-}
+        })
+    }
 
-function transfer({transfer, apply}) {
-    // start with a safety check by calling the spotify api to get user information
-    this.check({
-        apply: apply,
-        fail: () => transfer.abort(),
-        done: user => {
+    _transfer(transfer) {
+        // start by getting user information
+        this._request("https://api.spotify.com/v1/me").then(user => {
+            let process
             let query
             let push
             // assign the variables depending on the datatype
@@ -144,87 +109,58 @@ function transfer({transfer, apply}) {
                 case "artists":
                     // query as many artists as possible using the name
                     // then filter for those whose name is exactly the one we look for and return the first result
-                    query = artist => request(
-                        "https://api.spotify.com/v1/search?limit=50&type=artist&q=artist:" + artist.name,
-                        this.token
-                    ).then(res => res.artists.items.filter(it => it.name.toLowerCase() === artist.name.toLowerCase()).map(it => it.id).slice(0, 1))
-                    push = data => request(
-                        "https://api.spotify.com/v1/me/following?type=artist",
-                        this.token,
-                        {method: "PUT", ids: data.map(it => it.spotify)}
-                    )
+                    process = (res, artist) => res.artists.items
+                        .filter(it => it.name.toLowerCase() === artist.name.toLowerCase())
+                        .map(it => it.id)
+                    query = artist => "https://api.spotify.com/v1/search?limit=50&type=artist&q=artist:" + artist.name
+                    push = "https://api.spotify.com/v1/me/following?type=artist"
                     break
                 case "albums":
-                    query = album => request(
-                        "https://api.spotify.com/v1/search?limit=1&type=album&q=upc:" + album.upc,
-                        this.token
-                    ).then(res => res.albums.items.map(it => it.id))
-                    push = data => request(
-                        "https://api.spotify.com/v1/me/albums",
-                        this.token,
-                        {method: "PUT", ids: data.map(it => it.spotify)}
-                    )
+                    process = res => res.albums.items.map(it => it.id)
+                    query = album => "https://api.spotify.com/v1/search?limit=1&type=album&q=upc:" + album.upc
+                    push = "https://api.spotify.com/v1/me/albums"
                     break
                 case "tracks":
-                    query = track => request(
-                        "https://api.spotify.com/v1/search?limit=1&type=track&q=isrc:" + track.isrc,
-                        this.token
-                    ).then(res => res.tracks.items.map(it => it.id))
-                    push = data => request(
-                        "https://api.spotify.com/v1/me/tracks",
-                        this.token,
-                        {method: "PUT", ids: data.map(it => it.spotify)}
-                    )
+                    process = res => res.tracks.items.map(it => it.id)
+                    query = track => "https://api.spotify.com/v1/search?limit=1&type=track&q=isrc:" + track.isrc
+                    push = "https://api.spotify.com/v1/me/tracks"
                     break
                 case "playlist":
                     // use a different strategy for playlists, i.e.:
                     //   > first post a request to build the playlist using the user id and the playlist data
-                    //   > then call the transferRoutine routine to post tracks on the newly created playlist
-                    request(
-                        "https://api.spotify.com/v1/users/" + user.id + "/playlists",
-                        this.token, {
-                            method: "POST",
-                            name: transfer.data.name,
-                            description: transfer.data.description,
-                            public: transfer.data.open
-                        }
-                    ).done(playlist => this.transferRoutine({
-                            query: item => request(
-                                "https://api.spotify.com/v1/search?limit=1&type=track&q=isrc:" + item.isrc,
-                                this.token
-                            ).then(res => res.tracks.items.map(it => it.id)),
-                            push: data => request(
-                                "https://api.spotify.com/v1/playlists/" + playlist.id + "/tracks",
-                                this.token,
-                                {method: "POST", uris: data.map(it => "spotify:track:" + it.spotify)}
-                            ),
+                    //   > then call the _transferRoutine routine to post tracks on the newly created playlist
+                    this._request("https://api.spotify.com/v1/users/" + user.id + "/playlists", {
+                        method: "POST",
+                        message: "Error during playlist creation",
+                        name: transfer.data.name,
+                        description: transfer.data.description,
+                        public: transfer.data.open
+                    }).then(playlist => this._transferRoutine({
+                            process: res => res.tracks.items.map(it => it.uri),
+                            query: item => "https://api.spotify.com/v1/search?limit=1&type=track&q=isrc:" + item.isrc,
+                            push: batch => new Object({
+                                url: "https://api.spotify.com/v1/playlists/" + playlist.id + "/tracks",
+                                method: "POST",
+                                uris: batch
+                            }),
                             limit: 50,
-                            transfer: transfer,
-                            apply: apply
+                            transfer: transfer
                         })
-                    ).fail(res => {
-                        // in case of failure, wait 2 seconds before trying again
-                        console.warn("Error during playlist creation, retrying in 2 seconds", res)
-                        setTimeout(() => this.transfer({transfer: transfer, apply: apply}), 2000)
-                    })
+                    ).catch(() => transfer.abort())
                     return
                 default:
                     console.warn("Unexpected group type " + transfer.data.type)
                     transfer.abort()
                     return
             }
-            // call the transferRoutine routine setting the routine with the given variables
-            this.transferRoutine({
+            // call the _transferRoutine routine setting the routine with the given variables
+            this._transferRoutine({
+                process: process,
                 query: query,
-                push: push,
+                push: batch => new Object({url: push, method: "PUT", ids: batch}),
                 limit: 50,
-                transfer: transfer,
-                apply: apply
+                transfer: transfer
             })
-        }
-    })
+        }).catch(() => transfer.abort())
+    }
 }
-
-export const sourceSpotify = new SourceService({fetch: fetch, check: check, ...data})
-
-export const targetSpotify = new TargetService({transfer: transfer, check: check, ...data})

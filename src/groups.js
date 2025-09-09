@@ -9,38 +9,22 @@ function item(data) {
     }
 }
 
-// an object whose execution can be deferred
+// an object that wraps a jQuery deferred for asynchronous execution
 class Deferred {
-    #ready
-    #callbacks
+    #deferred
 
     constructor() {
-        // internal variable to keep track of whether all the execution is finished
-        this.#ready = false
-
-        // additional callbacks to be called once the execution is finished
-        this.#callbacks = []
+        this.ready = false
+        this.#deferred = $.Deferred()
     }
 
-    get ready() {
-        return this.#ready
+    get deferred() {
+        return this.#deferred.promise()
     }
 
-    onReady(callback) {
-        // push the callback in the list
-        this.#callbacks.push(callback)
-        // if the object is ready (i.e., the execution is finished), run the callback and clear the list
-        if (this.ready) {
-            callback()
-        }
-    }
-
-    done() {
-        // changes the ready state and runs the callbacks after (to be called from an outside handler)
-        this.#ready = true
-        for (const callback of this.#callbacks) {
-            callback()
-        }
+    complete() {
+        this.ready = true
+        this.#deferred.resolve()
     }
 }
 
@@ -53,13 +37,13 @@ export class Group extends Deferred {
         super()
 
         // if items is a function, this is assigned to the internal fetching routine and the items are empty
-        // otherwise, the routine simply calls "done" and the items are mapped using the utility function
+        // otherwise, the routine simply calls "complete" and the items are mapped using the utility function
         let routine
         if (typeof items === "function") {
             routine = items
             items = []
         } else {
-            routine = group => group.done()
+            routine = group => group.complete()
             items = items.map(it => item(it))
         }
 
@@ -133,7 +117,7 @@ export class Playlist extends Group {
 
 // a group which represents a set of groups
 export class All extends Group {
-    constructor(items, routine = group => group.done()) {
+    constructor(items, routine = group => group.complete()) {
         // pass the routine to the super constructor
         super(routine, "all", undefined)
         // add the already fetched items to itself
@@ -176,7 +160,7 @@ export class Transfer extends Deferred {
         this.#status = 1
 
         // set a callback for when all the group items have been fetched
-        group.onReady(() => {
+        group.deferred.then(() => {
             // filter the internal items to keep the select items only
             this.items = group.items.filter(it => it.selected)
             // set the transferred items to zero to indicate that the transferring can start
@@ -186,13 +170,13 @@ export class Transfer extends Deferred {
 
     get status() {
         switch (this.#status) {
+            case 1:
+                return "Fetching (" + this.items.length + " items)"
+            case 2:
+                return "Transferring (" + this.transferred + " items)"
             case 3:
                 return "Completed (" + this.missing.length + " missing)"
-            case 2:
-                return (this.transferred - this.missing.length) + " transferred; " + this.missing.length + " missing..."
-            case 1:
-                return this.items.length + " fetched..."
-            case 0:
+            default:
                 return "Transferring Process Aborted"
         }
     }
@@ -202,15 +186,15 @@ export class Transfer extends Deferred {
         this.transferred += value
     }
 
-    // set the status to 3 (completed) when "done" is called
-    done() {
-        super.done()
+    // set the status to 3 (completed) when "complete" is called
+    complete() {
+        super.complete()
         this.#status = 3
     }
 
-    // stops the transferring due to a request error (super call to "done", but then set the status to 0)
+    // stops the transferring due to a request error (super call to "complete", but then set the status to 0)
     abort() {
-        super.done()
+        super.complete()
         this.#status = 0
     }
 

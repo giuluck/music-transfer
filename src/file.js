@@ -1,70 +1,31 @@
-import {SourceService, TargetService} from "./service.js"
-import {All, Group} from "./groups.js";
+import {Service} from "./service.js"
+import {All, Group} from "./groups.js"
 
-const data = {
-    name: "file",
-    title: "Local File (.json)"
-}
-
-function transfer({transfer}) {
-    transfer.increment(transfer.items.length)
-    transfer.done()
-    if (this.finished) {
-        const name = this.transfers.length === 1 ? `_${transfer.name.replaceAll(" ", "_")}` : ""
-        const text = JSON.stringify(this.transfers.map(it => it.toJSON()), null, 2)
-        const link = document.createElement("a")
-        link.style.display = "none"
-        link.setAttribute("href", "data:text/plain;charset=utf-8," + encodeURIComponent(text))
-        link.setAttribute("download", "music_transfer" + name + ".json")
-        document.body.appendChild(link)
-        link.click()
-        document.body.removeChild(link)
-    }
-}
-
-function fetch({done, fail}) {
-    // try to read the content of the file from the cache
-    try {
-        // if everything goes well, run the "done" routine using the parsed groups as inputs
-        const content = sessionStorage.getItem("fileContent")
-        const groups = JSON.parse(content).map(Group.fromJSON)
-        done(new All(groups))
-    } catch (exception) {
-        // otherwise, clear the cache and run the "fail" routine
-        this.clear()
-        fail(exception)
-    }
-}
-
-function check({done}) {
-    done()
-}
-
-class SourceFile extends SourceService {
-    constructor({name, title, fetch}) {
+export class File extends Service {
+    constructor(apply) {
+        super(apply, "Local File (.json)")
         const file = sessionStorage.getItem("fileToken")
-        super({
-            name: name,
-            title: file ? file : title,
-            token: () => sessionStorage.getItem("fileToken"),
-            fetch: fetch
-        })
+        this.sourceTitle = file ? file : this.sourceTitle
     }
 
-    // when deselected, clear the cache so that selecting it again will open up another modal window (+ reset status)
+    select(source) {
+        super.select(source)
+        // in case of target selection, set a dummy token to avoid login since no file selection is needed
+        this.token = source ? undefined : "dummy"
+    }
+
+    // when deselected, reset the token as well so that selecting it again will open up another modal window
     deselect() {
         super.deselect()
-        this.clear()
         this.fetched = false
-    }
-
-    clear() {
-        this.title = "Local File (.json)"
+        this.token = undefined
+        this.sourceTitle = "Local File (.json)"
         sessionStorage.removeItem("fileToken")
         sessionStorage.removeItem("fileContent")
     }
 
-    login({done = () => void 0, fail = () => void 0, apply = () => void 0}) {
+    login() {
+        const deferred = $.Deferred()
         // otherwise, build an input element to raise a modal window for file selection
         const input = document.createElement("input")
         input.style.display = "none"
@@ -76,23 +37,54 @@ class SourceFile extends SourceService {
             const file = input.files[0]
             const reader = new FileReader()
             reader.readAsText(file, "UTF-8")
+            // if the reading succeeded, update the token and the cache, then resolve the deferred
             reader.onload = () => {
-                // if the reading succeeded, update the token and the cache, then run the "done" routine
-                this.title = file.name
+                this.token = file.name
+                this.sourceTitle = file.name
                 sessionStorage.setItem("fileToken", file.name)
                 sessionStorage.setItem("fileContent", reader.result.toString())
-                done()
-                apply()
+                deferred.resolve()
             }
-            reader.onerror = _ => {
-                // if the reading fails, run the "fail" routine
-                fail(reader.error)
-                apply()
-            }
+            // if the reading fails, reject the deferred
+            reader.onerror = _ => deferred.reject(reader.error)
+        })
+        return deferred.promise()
+    }
+
+    _fetch() {
+        // create a jQuery custom deferred and try to read the content of the file from the cache
+        const deferred = $.Deferred()
+        try {
+            // if everything goes well, resolve the deferred assigning the parsed groups as inputs
+            const content = sessionStorage.getItem("fileContent")
+            const groups = JSON.parse(content).map(Group.fromJSON)
+            deferred.resolve(new All(groups))
+        } catch (exception) {
+            // otherwise, reset the cache and reject the deferred
+            this.deselect()
+            deferred.reject(exception)
+        }
+        return deferred.promise()
+    }
+
+    _transfer(transfer) {
+        transfer.increment(transfer.items.length)
+        transfer.complete()
+    }
+
+    transfer(group) {
+        super.transfer(group)
+        // when all the transfer promises have been resolved, join the results into a single file
+        $.when(...this.transfers.map(it => it.deferred)).then(() => {
+            const name = this.transfers.length === 1 ? `_${this.transfers[0].name.replaceAll(" ", "_")}` : ""
+            const text = JSON.stringify(this.transfers.map(it => it.toJSON()), null, 2)
+            const link = document.createElement("a")
+            link.style.display = "none"
+            link.setAttribute("href", "data:text/plain;charset=utf-8," + encodeURIComponent(text))
+            link.setAttribute("download", "music_transfer" + name + ".json")
+            document.body.appendChild(link)
+            link.click()
+            document.body.removeChild(link)
         })
     }
 }
-
-export const sourceFile = new SourceFile({fetch: fetch, check: check, ...data})
-
-export const targetFile = new TargetService({token: () => true, transfer: transfer, check: check, ...data})

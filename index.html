@@ -35,11 +35,11 @@
                 ng-model="choices.source"
                 ng-init="update()"
                 ng-change="update()"
-                ng-options="service as service.title disable when service.name === 'Dummy' for service in sources">
+                ng-options="service as service.sourceTitle disable when service.name === 'dummy' for service in services">
         </select>
     </div>
 
-    <div class="d-flex flex-column flex-md-row gap-1 gap-md-3 align-items-md-center" ng-if="choices.source.logged">
+    <div class="d-flex flex-column flex-md-row gap-1 gap-md-3 align-items-md-center" ng-if="choices.source.token">
         <label for="target" class="text-nowrap">
             <span class="fw-bolder">2.</span> Select your <span class="text-emphasize">target</span> service:
         </label>
@@ -49,12 +49,11 @@
                 ng-model="choices.target"
                 ng-init="update()"
                 ng-change="update()"
-                ng-options="service as service.title disable when service.name === 'Dummy' for service in targets">
-            <option value="{{targetDummy}}" disabled>Select an option...</option>
+                ng-options="service as service.targetTitle disable when service.name === 'dummy' for service in services">
         </select>
     </div>
 
-    <div class="d-flex flex-column gap-2" ng-if="choices.source.logged && choices.target.logged">
+    <div class="d-flex flex-column gap-2" ng-if="choices.source.token && choices.target.token">
         <label for="group">
             <span class="fw-bolder">3.</span> Select the <span class="text-emphasize">group</span> you want to transfer:
         </label>
@@ -112,7 +111,7 @@
             <div class="modal-content">
                 <div class="modal-header">
                     <div class="modal-title h5" id="label">
-                        {{choices.source.name}} {{choices.animation}} {{choices.target.name}}
+                        {{choices.source.name.toUpperCase()}} {{choices.animation}} {{choices.target.name.toUpperCase()}}
                     </div>
                 </div>
                 <div class="modal-body">
@@ -142,7 +141,11 @@
                     </div>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" data-bs-dismiss="modal" ng-disabled="!choices.target.finished">
+                    <!-- On closing the modal window, reset the target by calling deselect and then select it again -->
+                    <button type="button"
+                            data-bs-dismiss="modal"
+                            ng-disabled="!choices.target.finished"
+                            ng-click="choices.target.deselect(); choices.target.select()">
                         Close
                     </button>
                 </div>

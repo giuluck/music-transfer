@@ -1,121 +1,96 @@
-import {sourceDummy, targetDummy} from "./service.js"
-import {sourceFile, targetFile} from "./file.js"
-import {sourceTidal, targetTidal} from "./tidal.js"
-import {sourceSpotify, targetSpotify} from "./spotify.js"
+import {Dummy} from "./service.js"
+import {File} from "./file.js"
+import {Tidal} from "./tidal.js"
+import {Spotify} from "./spotify.js"
 
 angular.module("module", ["ngSanitize"]).controller("controller", function ($scope) {
     // set list of available services and default choices (set source and target to a dummy service if none is selected)
-    $scope.sources = {dummy: sourceDummy, file: sourceFile, tidal: sourceTidal, spotify: sourceSpotify}
-    $scope.targets = {dummy: targetDummy, file: targetFile, tidal: targetTidal, spotify: targetSpotify}
+    $scope.services = {
+        dummy: new Dummy(() => $scope.$apply()),
+        file: new File(() => $scope.$apply()),
+        tidal: new Tidal(() => $scope.$apply()),
+        spotify: new Spotify(() => $scope.$apply())
+    }
     $scope.choices = {
-        source: Object.values($scope.sources).filter(it => it.selected)[0] || sourceDummy,
-        target: Object.values($scope.targets).filter(it => it.selected)[0] || targetDummy,
+        source: $scope.services[sessionStorage.getItem("source")] || $scope.services.dummy,
+        target: $scope.services[sessionStorage.getItem("target")] || $scope.services.dummy,
         group: undefined,
         animation: undefined
     }
-    const services = {source: sourceDummy, target: targetDummy}
+    const selected = {source: $scope.choices.source, target: $scope.choices.target}
+    selected.source.select()
+    selected.target.select()
 
-    // if a code can be retrieved in the location, use the "waiting" flag to understand which service is waiting
-    // then try to exchange the token and eventually to fetch the results in case of success
+    // if a code can be retrieved in the location and a service is waiting for it, try to exchange the token
+    const waiting = sessionStorage.getItem("waiting")
     const params = new URLSearchParams(location.search)
     const code = params.get("code")
-    if (code) {
-        const waiting = sessionStorage.getItem("waiting")
-        for (const source of [true, false]) {
-            const service = $scope.choices[source ? "source" : "target"]
-            if (service.name === waiting) {
-                service.exchange({
-                    code: code,
-                    state: params.get("state"),
-                    done: () => {
-                        $scope.error = undefined
-                        $scope.choices.source.fetch({
-                            done: () => $scope.choices.group = $scope.choices.source.groups[0],
-                            fail: failFetching,
-                            apply: apply
-                        })
-                    },
-                    fail: res => failExchange(res, waiting === "source"),
-                    apply: apply
-                })
-            }
-        }
+    if (code && waiting) {
+        $scope.services[waiting].exchange(code, params.get("state"))
+            // in case of success, also fetch the data if the waiting service is the source
+            .then(() => fetch(waiting === "source"))
+            // in case of failure, if the result has a status it means that there was an error during the request,
+            // otherwise it means that the given state was wrong and the exchange method itself rejected the deferred
+            .catch(res => fail(res, waiting, "The server responded with " + (res.status ? "an error after token exchange request" : "a wrong state code")))
+            .always(() => {
+                // always unset the "waiting" variable after an exchange
+                sessionStorage.removeItem("waiting")
+                $scope.$apply()
+            })
         // use history.pushState to remove the query without reloading the page
         history.pushState({}, null, location.pathname)
     }
+
     // update handler for source and transfer change
     $scope.update = () => {
         // handle prohibited cases:
         //   - if the source is dummy, the target must be dummy as well
         //   - if the services coincide, either reset the target to its old value if it was dummy, or swap them
-        if ($scope.choices.source === sourceDummy) {
-            $scope.choices.target = targetDummy
-        } else if ($scope.choices.source.name === $scope.choices.target.name) {
-            if (services.target === targetDummy) {
-                $scope.choices.target = targetDummy
+        if ($scope.choices.source === $scope.services.dummy) {
+            $scope.choices.target = $scope.services.dummy
+        } else if ($scope.choices.source === $scope.choices.target) {
+            if (selected.target === $scope.services.dummy) {
+                $scope.choices.target = $scope.services.dummy
             } else {
-                $scope.choices.source = $scope.sources[services.target.name]
-                $scope.choices.target = $scope.targets[services.source.name]
+                $scope.choices.source = selected.target
+                $scope.choices.target = selected.source
             }
         }
         // handle source/target changes
+        const waiting = $scope.services[sessionStorage.getItem("waiting")]
         for (const source of [true, false]) {
             const role = source ? "source" : "target"
             const newService = $scope.choices[role]
-            const oldService = services[role]
+            const oldService = selected[role]
             // if the two services are different, deselect the old one then assign and select the new one
             if (newService !== oldService) {
-                services[role] = newService
+                sessionStorage.setItem(role, newService.name)
+                selected[role] = newService
+                newService.select(source)
                 oldService.deselect()
-                newService.select()
             }
-            // if the service is not waiting and not already logged, try to log in
-            if (!newService.waiting && !newService.logged) {
-                newService.login({fail: err => failAuthentication(err, source), apply: apply})
+            // if the service has a token, try to fetch the results (if it is the source)
+            // otherwise, try to log in unless it is waiting
+            if (newService.token) {
+                fetch(source)
+            } else if (newService !== waiting) {
+                newService.login()
+                    .then(res => {
+                        // if a URL is returned, set the waiting variable and relocate to get the code
+                        if (res instanceof URL) {
+                            sessionStorage.setItem("waiting", newService.name)
+                            location = res
+                        }
+                    })
+                    .catch(res => fail(res, role, "The server responded with an error after the authentication request"))
+                    .always(() => $scope.$apply())
             }
-        }
-        // if the source is logged, try to fetch the results
-        const source = services.source
-        if (source.logged) {
-            source.fetch({
-                done: () => {
-                    // take the groups from the $scope rather than the service in case it was changed meanwhile
-                    $scope.choices.group = $scope.choices.source.groups[0]
-                    $scope.error = undefined
-                },
-                fail: res => {
-                    // if the token is wrong or expired (Error 401) clear the service and select it again
-                    if (res.status === 401) {
-                        source.clear()
-                        source.login({fail: err => failAuthentication(err, true), apply: apply})
-                    } else {
-                        failFetching(res)
-                    }
-                },
-                apply: apply
-            })
-        }
-        // if the target is logged, test that everything is working
-        const target = services.target
-        if (target.logged) {
-            target.check({
-                fail: res => {
-                    // if the token is wrong or expired (Error 401) clear the service and select it again
-                    if (res.status === 401) {
-                        target.clear()
-                        target.login({fail: err => failAuthentication(err, true), apply: apply})
-                    } else {
-                        failFetching(res)
-                    }
-                },
-                apply: apply
-            })
         }
     }
 
     // transfer handler for button click
     $scope.transfer = () => {
-        $scope.choices.target.transfer({group: $scope.choices.group, apply: apply})
+        $scope.choices.target.transfer($scope.choices.group)
         $scope.choices.animation = ">~~~~~~~~"
         animate()
     }
@@ -124,6 +99,23 @@ angular.module("module", ["ngSanitize"]).controller("controller", function ($sco
     $scope.selection = selected => $scope.choices.group.items.map(it => it.selected = selected)
 
     // utility functions
+
+    function fetch(source) {
+        // fetch only if "source" is true
+        if (!source) return
+        selected.source.fetch()
+            .then(() => $scope.error = undefined)
+            .then(() => $scope.choices.group = selected.source.groups[0])
+            .catch(res => fail(res, "source", "The server responded with an error after the fetch request"))
+            .always(() => $scope.$apply())
+    }
+
+    function fail(res, role, message) {
+        $scope.error = message
+        console.warn(message, res)
+        $scope.choices[role] = $scope.services.dummy
+        $scope.update()
+    }
 
     function animate() {
         // recursive call to animate the transfer string
@@ -136,40 +128,7 @@ angular.module("module", ["ngSanitize"]).controller("controller", function ($sco
                 $scope.choices.animation = tail + head
                 animate()
             }
-            apply()
+            $scope.$apply()
         }, 200)
-    }
-
-    function apply() {
-        $scope.$apply()
-    }
-
-    function failAuthentication(res, source) {
-        fail(res, source, "The server responded with an error after the authentication request")
-    }
-
-    function failFetching(res) {
-        fail(res, true, "The server responded with an error after the fetch request")
-    }
-
-    function failExchange(res, source) {
-        // if the result has a status it means that there was an error during the request, otherwise it means
-        // that the given state was wrong and the exchange method directly launched the failure routine itself
-        fail(res, source, res.status ?
-            "The server responded with an error after token exchange request" :
-            "The server responded with a wrong state code")
-    }
-
-    function fail(res, source, message) {
-        $scope.error = message
-        console.warn(message, res)
-        if (source) {
-            $scope.choices.source.clear()
-            $scope.choices.source = sourceDummy
-        } else {
-            $scope.choices.target.clear()
-            $scope.choices.target = targetDummy
-        }
-        $scope.update()
     }
 })

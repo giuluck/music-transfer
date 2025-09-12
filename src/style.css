@@ -45,6 +45,26 @@ button {
     border-radius: 5px;
 }
 
+.swal2-html-container {
+    text-align: justify;
+    line-height: 1.2rem;
+    font-size: calc(0.9 * var(--font-size));
+
+    a, strong {
+        font-weight: 500;
+    }
+}
+
+.swal2-text {
+    font-weight: 500;
+    text-align: justify;
+    line-height: 1.2rem;
+}
+
+.swal2-file {
+    font-size: var(--font-size) !important;
+}
+
 .modal {
     font-size: calc(0.8 * var(--font-size));
 }

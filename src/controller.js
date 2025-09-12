@@ -111,8 +111,8 @@ angular.module("module", ["ngSanitize"]).controller("controller", function ($sco
     }
 
     function fail(res, role, message) {
-        $scope.error = message
         console.warn(message, res)
+        $scope.error = message
         $scope.choices[role] = $scope.services.dummy
         $scope.update()
     }

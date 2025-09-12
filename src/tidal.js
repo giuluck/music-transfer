@@ -161,7 +161,12 @@ export class Tidal extends Service {
                     // query = track => "https://openapi.tidal.com/v2/tracks?countryCode=" + user.country + "&filter[isrc]=" + track.isrc
                     // push = "https://openapi.tidal.com/v2/userCollections/" + user.id + "/relationships/tracks?countryCode=" + user.country
                     // break
-                    alert("Transferring favourite tracks is not yet possible on Tidal.\nYou will find your tracks in a new playlist.")
+                    // return an alert using sweet alert (swal)
+                    Swal.fire({
+                        title: "Tidal Favourite Tracks",
+                        text: "Transferring favourite tracks is not yet possible on Tidal, you will find your tracks in a new playlist.",
+                        icon: "info"
+                    })
                     // handle favourite tracks using the same strategy of playlists since the APIs do not support this
                     this._request("https://openapi.tidal.com/v2/playlists?countryCode=" + user.country, {
                         method: "POST",

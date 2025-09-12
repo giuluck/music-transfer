@@ -86,7 +86,7 @@ export class Group extends Deferred {
         if (constructor) {
             return new constructor(items, data)
         } else {
-            throw new Error("Unknown type: " + type)
+            throw {message: "Unknown type: " + type}
         }
     }
 }

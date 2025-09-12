@@ -17,7 +17,7 @@ export class File extends Service {
     // when deselected, reset the token as well so that selecting it again will open up another modal window
     deselect() {
         super.deselect()
-        this.fetched = false
+        this._fetched = false
         this.token = undefined
         this.sourceTitle = "Local File (.json)"
         sessionStorage.removeItem("fileToken")
@@ -26,27 +26,28 @@ export class File extends Service {
 
     login() {
         const deferred = $.Deferred()
-        // otherwise, build an input element to raise a modal window for file selection
-        const input = document.createElement("input")
-        input.style.display = "none"
-        input.setAttribute("type", "file")
-        input.setAttribute("accept", ".json;application/json")
-        input.dispatchEvent(new MouseEvent("click"))
-        input.addEventListener("change", _ => {
-            // when the element is selected, retrieve the file and read it
-            const file = input.files[0]
-            const reader = new FileReader()
-            reader.readAsText(file, "UTF-8")
-            // if the reading succeeded, update the token and the cache, then resolve the deferred
-            reader.onload = () => {
-                this.token = file.name
-                this.sourceTitle = file.name
-                sessionStorage.setItem("fileToken", file.name)
-                sessionStorage.setItem("fileContent", reader.result.toString())
-                deferred.resolve()
+        Swal.fire({
+            title: "Select File",
+            input: "file",
+        }).then(res => {
+            const file = res.value
+            if (file) {
+                const reader = new FileReader()
+                reader.readAsText(file, "UTF-8")
+                // if the reading succeeded, update the token and the cache, then resolve the deferred
+                reader.onload = () => {
+                    console.log("here")
+                    this.token = file.name
+                    this.sourceTitle = file.name
+                    sessionStorage.setItem("fileToken", file.name)
+                    sessionStorage.setItem("fileContent", reader.result.toString())
+                    deferred.resolve()
+                }
+                // if the reading fails, reject the deferred
+                reader.onerror = _ => deferred.reject(reader.error)
+            } else {
+                deferred.reject({message: "Invalid File: '" + file + "'"})
             }
-            // if the reading fails, reject the deferred
-            reader.onerror = _ => deferred.reject(reader.error)
         })
         return deferred.promise()
     }

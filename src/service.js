@@ -13,13 +13,12 @@ function generate(length) {
 export class Service {
     #all
     #apply
-    #credentials
 
     constructor(apply, title, token = undefined, credentials = {}) {
         const name = this.constructor.name
 
         if (name === "Service") {
-            throw new Error("Service is an abstract class, therefore it cannot be instantiated")
+            throw {message: "Service is an abstract class, therefore it cannot be instantiated"}
         }
 
         // the (short) name of the service, i.e., the class name
@@ -34,20 +33,20 @@ export class Service {
         // if a token is passed set its value, otherwise try to load it from the session storage
         this.token = token ? token : sessionStorage.getItem(this.name + "Token")
 
-        // whether the service has correctly fetched the results
-        this.fetched = false
-
         // a list of Transfer instances transferred from the source service (initially empty)
         this.transfers = []
 
         // flag to keep track of when every transfer object has been transferred
         this.finished = false
 
-        // function to update the angular scope
-        this.#apply = apply
+        // whether the service has correctly fetched the results
+        this._fetched = false
 
         // credentials for authentication
-        this.#credentials = credentials
+        this._credentials = credentials
+
+        // function to update the angular scope
+        this.#apply = apply
 
         // an "All" object containing all the groups (already fetched or to be fetched)
         this.#all = undefined
@@ -95,26 +94,33 @@ export class Service {
                 .replace(/\//g, '_'))
             // resolve the deferred, set the waiting flag to this service, then redirect to the authorization link
             .then(challenge => {
-                const url = new URL(this.#credentials.authorizationEndpoint)
+                const url = new URL(this._credentials.authorizationEndpoint)
                 url.search = new URLSearchParams({
                     response_type: "code",
                     redirect_uri: redirect,
-                    client_id: this.#credentials.clientID,
-                    scope: this.#credentials.scope,
+                    client_id: this._credentials.clientID,
+                    scope: this._credentials.scope,
                     code_challenge_method: "S256",
                     code_challenge: challenge,
                     state: state
                 }).toString()
                 deferred.resolve(url)
             })
-            // reject the deferred in case of failure
-            .catch(res => deferred.reject(res))
+            // in case of failure, reject the deferred and remove each item related to this service from the cache
+            .catch(res => {
+                for (const item of Object.keys(sessionStorage)) {
+                    if (item.startsWith(this.name)) {
+                        sessionStorage.removeItem(item)
+                    }
+                }
+                deferred.reject(res)
+            })
         return deferred.promise()
     }
 
     exchange(code, state) {
         const deferred = $.Deferred()
-        if (!this.#credentials) {
+        if (!this._credentials) {
             // if authentication is not needed (i.e., no credentials are available) resolve the deferred
             deferred.resolve()
         } else {
@@ -133,11 +139,11 @@ export class Service {
                 //   > if everything goes well, store the access and the refresh tokens, then resolve the deferred
                 //   > otherwise, reject the referred
                 $.ajax({
-                    url: this.#credentials.exchangeEndpoint,
+                    url: this._credentials.exchangeEndpoint,
                     method: "POST",
                     data: {
                         grant_type: "authorization_code",
-                        client_id: this.#credentials.clientID,
+                        client_id: this._credentials.clientID,
                         redirect_uri: redirect,
                         code_verifier: verifier,
                         code: code
@@ -171,11 +177,11 @@ export class Service {
                 case 401:
                     // in case of missing authorization, refresh the token, store it, and then run the request again
                     return $.ajax({
-                        url: this.#credentials.exchangeEndpoint,
+                        url: this._credentials.exchangeEndpoint,
                         method: "POST",
                         data: {
                             grant_type: "refresh_token",
-                            client_id: this.#credentials.clientID,
+                            client_id: this._credentials.clientID,
                             refresh_token: sessionStorage.getItem(this.name + "Refresh")
                         }
                     }).then(res => {
@@ -319,19 +325,19 @@ export class Service {
 
     fetch() {
         const deferred = $.Deferred()
-        if (this.fetched) {
+        if (this._fetched) {
             // if the service was already fetched, resolve the referred
             deferred.resolve()
         } else {
             // otherwise, set the fetched status to true to avoid multiple calls and call the routine
-            this.fetched = true
+            this._fetched = true
             this._fetch().then(res => {
                 // if the routine succeed, assign the groups and resolve the deferred
                 this.#all = res
                 deferred.resolve()
             }).catch(res => {
                 // if it fails, restore the fetched status to false and reject the deferred
-                this.fetched = false
+                this._fetched = false
                 deferred.reject(res)
             })
         }
